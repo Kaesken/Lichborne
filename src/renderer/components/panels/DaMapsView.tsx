@@ -12,6 +12,7 @@
 //   - zoomed out, each building (a connected group of indoor rooms) is drawn
 //     as one outline; zoom in and its rooms appear ("semantic zoom")
 import { useState, useRef, useEffect, useMemo, useCallback, type CSSProperties } from 'react'
+import { buildLayout, type DaLayout } from './damaps/daMapsLayout'
 import type { LichRoom } from './mapTypes'
 import { lichTitle } from './mapTypes'
 import { scopedKey } from '../../characterScope'
@@ -51,7 +52,7 @@ interface World { areas: WorldArea[]; byImage: Map<string, WorldArea>; heads: { 
 
 function buildWorld(lichDb: Map<number, LichRoom>, imageIndex: Map<string, LichRoom[]>): World {
   const groups = new Map<string, WorldArea[]>()
-  for (const [image, rooms] of imageIndex) {
+  for (const [image, rooms] of getLayout(lichDb, imageIndex).imageIndex) {
     const area = getArea(lichDb, imageIndex, image)
     if (!area || area.rooms.length === 0) continue
     const province = areaProvince(image, rooms)
@@ -93,15 +94,25 @@ function shortAreaName(name: string): string {
 // character, so sharing across panels is safe. Keyed weakly on the db Map so a
 // reloaded database drops the old areas.
 const areaCache = new WeakMap<Map<number, LichRoom>, Map<string, DaArea>>()
+// Every room gets a position: hand-placed image_coords where Lich has them,
+// otherwise placed beside its neighbours (daMapsLayout). Built once per DB.
+const layoutCache = new WeakMap<Map<number, LichRoom>, DaLayout>()
+function getLayout(lichDb: Map<number, LichRoom>, imageIndex: Map<string, LichRoom[]>): DaLayout {
+  let l = layoutCache.get(lichDb)
+  if (!l) { l = buildLayout(lichDb, imageIndex); layoutCache.set(lichDb, l) }
+  return l
+}
+
 function getArea(lichDb: Map<number, LichRoom>, imageIndex: Map<string, LichRoom[]>, image: string): DaArea | null {
   if (!image) return null
   let perDb = areaCache.get(lichDb)
   if (!perDb) { perDb = new Map(); areaCache.set(lichDb, perDb) }
   let a = perDb.get(image)
   if (!a) {
-    const rooms = imageIndex.get(image)
+    const layout = getLayout(lichDb, imageIndex)
+    const rooms = layout.imageIndex.get(image)
     if (!rooms) return null
-    a = buildArea(image, rooms, lichDb)
+    a = buildArea(image, rooms, lichDb, layout)
     perDb.set(image, a)
   }
   return a
@@ -126,7 +137,7 @@ export default function DaMapsView({ lichDb, imageIndex, currentRoom, character,
   }, [mode, lichDb, imageIndex])
   const [hoverArea, setHoverArea] = useState<string | null>(null)
 
-  const hereImage = currentRoom?.image_coords ? currentRoom.image ?? '' : ''
+  const hereImage = currentRoom ? getLayout(lichDb, imageIndex).areaOf.get(currentRoom.id) ?? '' : ''
   const [areaImage, setAreaImage] = useState<string>(hereImage)
   const [followPlayer, setFollowPlayer] = useState(true)
   const area = useMemo(() => getArea(lichDb, imageIndex, areaImage), [lichDb, imageIndex, areaImage])
@@ -553,7 +564,7 @@ export default function DaMapsView({ lichDb, imageIndex, currentRoom, character,
   }
 
   // ── Render ─────────────────────────────────────────────────────────────────
-  const unplaced = currentRoom && !currentRoom.image_coords
+  const unplaced = currentRoom && !hereImage
 
   return (
     <div className="map-canvas-wrap" style={{ display: 'flex', flexDirection: 'column', minHeight: 0 }}>

@@ -148,6 +148,7 @@ export interface DaArea {
 
 /** "zoluren-1-crossing-1377284934.png" → "Zoluren 1 Crossing". */
 export function areaDisplayName(image: string): string {
+  if (image.startsWith('~')) return `${image.slice(1)} (unmapped)`
   let s = image.replace(/\.(png|gif|jpe?g)$/i, '')
   s = s.replace(/[-_ ]\d{9,}$/, '')            // trailing upload timestamps
   s = s.replace(/[-_]+/g, ' ').replace(/\s+/g, ' ').trim()
@@ -216,12 +217,15 @@ function splitTags(tags: string[] | undefined): { forage: string[]; hunting: str
  * Build one area (one Lich tile) for drawing. Pure; cache the result per
  * (database, image). `lichDb` resolves exits that leave the area.
  */
-export function buildArea(image: string, rooms: LichRoom[], lichDb: Map<number, LichRoom>): DaArea {
+export function buildArea(
+  image: string, rooms: LichRoom[], lichDb: Map<number, LichRoom>,
+  layout?: { coords: Map<number, [number, number, number, number]>; areaOf: Map<number, string> },
+): DaArea {
   const placed: DaRoom[] = []
   const byId = new Map<number, DaRoom>()
 
   for (const r of rooms) {
-    const c = r.image_coords
+    const c = layout?.coords.get(r.id) ?? r.image_coords
     if (!c || c.length < 4) continue
     const [x1, y1, x2, y2] = c
     const w = Math.abs(x2 - x1), h = Math.abs(y2 - y1)
@@ -234,8 +238,9 @@ export function buildArea(image: string, rooms: LichRoom[], lichDb: Map<number, 
     const crossNames: string[] = []
     for (const k of Object.keys(r.wayto ?? {})) {
       const t = lichDb.get(Number(k))
-      if (t?.image && t.image !== image && t.image_coords) {
-        crossTo.add(t.image)
+      const tArea = t ? (layout ? layout.areaOf.get(t.id) : (t.image_coords ? t.image : undefined)) : undefined
+      if (t && tArea && tArea !== image) {
+        crossTo.add(tArea)
         crossNames.push(buildingName(lichTitle(t)))
       }
     }
@@ -304,8 +309,10 @@ export function buildArea(image: string, rooms: LichRoom[], lichDb: Map<number, 
     }
   }
 
-  // Buildings: connected groups of indoor rooms (joined by any exit). Zoomed
-  // out, each one is drawn as a single outline; zoomed in, its rooms appear.
+  // Buildings: connected indoor rooms that share a name ("Half Pint, Bar" +
+  // "Half Pint, Kitchen"), drawn as a dotted outline. Requiring the same name
+  // stops one long chain of indoor rooms (sewers, guild tunnels) from being
+  // boxed together across half the town.
   const parent = new Map<number, number>()
   const find = (x: number): number => {
     let p = parent.get(x) ?? x
@@ -316,9 +323,12 @@ export function buildArea(image: string, rooms: LichRoom[], lichDb: Map<number, 
   for (const room of placed) if (room.indoor) parent.set(room.id, room.id)
   for (const r of rooms) {
     if (!parent.has(r.id)) continue
+    const nm = buildingName(lichTitle(r))
     for (const k of Object.keys(r.wayto ?? {})) {
       const t = Number(k)
       if (!parent.has(t)) continue
+      const tr = lichDb.get(t)
+      if (!tr || buildingName(lichTitle(tr)) !== nm) continue
       const ra = find(r.id), rb = find(t)
       if (ra !== rb) parent.set(ra, rb)
     }
@@ -347,6 +357,9 @@ export function buildArea(image: string, rooms: LichRoom[], lichDb: Map<number, 
       x2: Math.max(...members.map(m => m.x + m.size / 2)) + pad,
       y2: Math.max(...members.map(m => m.y + m.size / 2)) + pad,
     }
+    // One-room shops are just a square (like Genie); an outline that would
+    // span a big part of the map means the rooms aren't really one building.
+    if (members.length < 2 || b.x2 - b.x1 > 300 || b.y2 - b.y1 > 300) continue
     const idx = buildings.push(b) - 1
     for (const m of members) m.building = idx
   }

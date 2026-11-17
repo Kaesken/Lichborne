@@ -4211,18 +4211,20 @@ When an animated aura class is applied, the `opacity` SVG attribute is omitted (
 
 ### 19.18 Da'Maps View (DaMapsView) *(experimental)*
 
-A third map mode, beside Lich Map and Genie Maps. Files: [DaMapsView.tsx](../src/renderer/components/panels/DaMapsView.tsx), [damaps/daMapsData.ts](../src/renderer/components/panels/damaps/daMapsData.ts). The name lives in one constant, `DA_MAPS_NAME`.
+A third map mode, beside Lich Map and Genie Maps. Files: [DaMapsView.tsx](../src/renderer/components/panels/DaMapsView.tsx), [damaps/daMapsData.ts](../src/renderer/components/panels/damaps/daMapsData.ts), [damaps/daMapsLayout.ts](../src/renderer/components/panels/damaps/daMapsLayout.ts). The name lives in one constant, `DA_MAPS_NAME`.
 
-**Data — Lich only, no Genie.** Rooms, ids, exits and travel are Lich's (`;go2 <id>` on right-click). Positions are each room's hand-placed `image_coords` on its Lich tile (the centre of the rect), one tile = one "area", so there is NO auto-layout — the lesson of §19.15. Rooms without `image_coords` are not drawn; standing in one shows a "no Da'Maps position yet" strip.
+**Data — Lich only, no Genie.** Rooms, ids, exits and travel are Lich's (`;go2 <id>` on right-click). Positions are each room's hand-placed `image_coords` on its Lich tile (the centre of the rect), one tile = one "area". **Every room is drawn** (the Genie maps show every room, and players expect the same): the ~5,000 rooms with no `image_coords` (shop interiors, upstairs, boats, homes) are placed by `buildLayout` beside the nearest positioned room, one step in the direction of the exit that leads there, nudged to the nearest free grid spot. It is a LOCAL placement anchored to hand-placed rooms, never a whole-map auto-layout, so the §19.15 hairball can't recur. Rooms that never connect to a positioned room (~240) go into "<location> (unmapped)" areas, laid out the same way.
 
 **Derived from Lich fields:**
 - indoor/outdoor — `paths[0]` starts "Obvious exits" (indoor) vs "Obvious paths" (outdoor)
 - room colour — a category from `tags` (`npchealer`, guild names, stat names, `bank`, shop tags, `portal`…), using the COLOR_LEGEND hexes; `swim` exits → water
 - forage — plain tags; hunting areas — snake_case tags
-- buildings — connected groups of indoor rooms; named by their most common title prefix
+- buildings — connected indoor rooms with the same title prefix ("Half Pint, Bar" + "Half Pint, Kitchen"), drawn as a dotted outline; one-room shops and any group spanning over 300px get no outline
 - labels — a room that leads to another tile is labelled with the destination's name; a categorised outdoor room with its own name
 
-**Semantic zoom.** Below `INDOOR_SCALE` each building is one filled outline (hover = building info, right-click = go2 its entrance); at or above it, its rooms are drawn inside a dashed outline. The ⌂ button forces indoor rooms on.
+**All rooms at every zoom.** The first build hid indoor rooms below a zoom level; Kaesken asked for every room always, so indoor rooms are always drawn inside their dotted building outline.
+
+**Local / Global.** Local shows one area (yours, or one opened from Global). Global shows every area as a thumbnail of all its rooms, grouped by province (`areaProvince`); click one to open it in Local.
 
 **Side panel.** Tabs "Map legend" / "Room". The Room tab follows the hovered room (sticky — it keeps the last room when the pointer leaves the map), a left-click pins a room, and with nothing hovered it shows the player's room. It lists mana per room-based realm (Life/Holy/Elemental/Arcane; Lunar is time-based, not room-based), forage (player finds + Lich tags), hunting, services, exits and cross-area links.
 
