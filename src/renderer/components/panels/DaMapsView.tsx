@@ -17,7 +17,7 @@ import { lichTitle } from './mapTypes'
 import { scopedKey } from '../../characterScope'
 import {
   DA_MAPS_NAME, DA_ARC_COLOR, DA_CATEGORIES, DA_OBS_EVENT, ROOM_REALMS, MANA_WORDS,
-  buildArea, areaDisplayName, guildRealm, loadObservations,
+  buildArea, areaProvince, guildRealm, loadObservations, PROVINCE_ORDER,
   type DaArea, type DaRoom, type DaArcCategory, type Realm, type DaObservations,
 } from './damaps/daMapsData'
 
@@ -32,11 +32,62 @@ interface Props {
 interface Transform { x: number; y: number; scale: number }
 
 const PANEL_FONT = 'calc(var(--panel-font-size, var(--game-font-size, 12px)) * 0.9)'
-const MIN_SCALE = 0.2
+const MIN_SCALE = 0.05
 const MAX_SCALE = 8
 /** At or above this zoom, indoor rooms are drawn; below it, buildings are outlines. */
 const INDOOR_SCALE = 1.4
 const PANEL_W = 270
+// Global view layout (world units): each area is a thumbnail in a grid cell,
+// grouped by province.
+const G_COLS = 10, G_CELL = 240, G_THUMB = 200, G_HEAD = 70
+
+interface WorldArea {
+  image: string; name: string; province: string; rooms: number
+  x: number; y: number          // cell top-left
+  s: number; ox: number; oy: number   // thumbnail transform (area px → world)
+  area: DaArea
+}
+interface World { areas: WorldArea[]; byImage: Map<string, WorldArea>; heads: { name: string; y: number }[]; w: number; h: number }
+
+function buildWorld(lichDb: Map<number, LichRoom>, imageIndex: Map<string, LichRoom[]>): World {
+  const groups = new Map<string, WorldArea[]>()
+  for (const [image, rooms] of imageIndex) {
+    const area = getArea(lichDb, imageIndex, image)
+    if (!area || area.rooms.length === 0) continue
+    const province = areaProvince(image, rooms)
+    const bw = Math.max(1, area.bbox.x2 - area.bbox.x1), bh = Math.max(1, area.bbox.y2 - area.bbox.y1)
+    // capped so a tiny area (1-3 rooms) isn't blown up to fill its cell
+    const sc = Math.min(G_THUMB / bw, G_THUMB / bh, 1.5)
+    const wa: WorldArea = { image, name: area.name, province, rooms: area.rooms.length, x: 0, y: 0, s: sc, ox: 0, oy: 0, area }
+    if (!groups.has(province)) groups.set(province, [])
+    groups.get(province)!.push(wa)
+  }
+  const areas: WorldArea[] = [], heads: { name: string; y: number }[] = []
+  let y = 0
+  for (const prov of PROVINCE_ORDER) {
+    const list = (groups.get(prov) ?? []).sort((a, b) => a.name.localeCompare(b.name))
+    if (!list.length) continue
+    heads.push({ name: prov, y: y + 44 })
+    y += G_HEAD
+    list.forEach((wa, i) => {
+      wa.x = (i % G_COLS) * G_CELL
+      wa.y = y + Math.floor(i / G_COLS) * G_CELL
+      const bw = (wa.area.bbox.x2 - wa.area.bbox.x1) * wa.s, bh = (wa.area.bbox.y2 - wa.area.bbox.y1) * wa.s
+      wa.ox = wa.x + (G_CELL - bw) / 2 - wa.area.bbox.x1 * wa.s
+      wa.oy = wa.y + 10 + (G_THUMB - bh) / 2 - wa.area.bbox.y1 * wa.s
+      areas.push(wa)
+    })
+    y += Math.ceil(list.length / G_COLS) * G_CELL
+  }
+  return { areas, byImage: new Map(areas.map(a => [a.image, a])), heads, w: G_COLS * G_CELL, h: y }
+}
+const worldCache = new WeakMap<Map<number, LichRoom>, World>()
+/** "Zoluren 1 Crossing" → "Crossing": the province heading already says where. */
+function shortAreaName(name: string): string {
+  const out = name.replace(/^(zoluren|therengia|ilithi|ilitha|ilithia|forfedhdar|qi|taisidon)\b\s*/i, '')
+    .replace(/^[A-Za-z]?-?\d+[a-z]?\b\s*/, '')
+  return out || name
+}
 
 // One parsed area per (database, tile) — areas describe the world, not a
 // character, so sharing across panels is safe. Keyed weakly on the db Map so a
@@ -64,14 +115,16 @@ const muted: CSSProperties = { color: 'var(--map-text-muted, #888)' }
 
 export default function DaMapsView({ lichDb, imageIndex, currentRoom, character, onSendCommand }: Props) {
   // ── Areas ──────────────────────────────────────────────────────────────────
-  const areaList = useMemo(() => {
-    const out: { image: string; name: string; count: number }[] = []
-    for (const [image, rooms] of imageIndex) {
-      const count = rooms.reduce((n, r) => n + (r.image_coords ? 1 : 0), 0)
-      if (count > 0) out.push({ image, name: areaDisplayName(image), count })
-    }
-    return out.sort((a, b) => a.name.localeCompare(b.name))
-  }, [imageIndex])
+  const [mode, setMode] = useState<'local' | 'global'>('local')
+  // The whole world is built once per map database (~60ms) the first time
+  // Global is opened, then cached.
+  const world = useMemo(() => {
+    if (mode !== 'global' && !worldCache.has(lichDb)) return null
+    let w = worldCache.get(lichDb)
+    if (!w) { w = buildWorld(lichDb, imageIndex); worldCache.set(lichDb, w) }
+    return w
+  }, [mode, lichDb, imageIndex])
+  const [hoverArea, setHoverArea] = useState<string | null>(null)
 
   const hereImage = currentRoom?.image_coords ? currentRoom.image ?? '' : ''
   const [areaImage, setAreaImage] = useState<string>(hereImage)
@@ -113,17 +166,53 @@ export default function DaMapsView({ lichDb, imageIndex, currentRoom, character,
   }, [followPlayer, hereImage, areaImage])
   const fittedFor = useRef('')
   useEffect(() => {
-    if (!area || fittedFor.current === area.image) return
+    if (mode !== 'local' || !area || fittedFor.current === area.image) return
     fittedFor.current = area.image
     // A new area: fit it, then (if we're in it) centre on the player.
     requestAnimationFrame(() => {
       fitToView()
       if (followPlayer && hereRoom) requestAnimationFrame(() => centerOn(hereRoom))
     })
-  }, [area, fitToView, followPlayer, hereRoom, centerOn])
+  }, [area, fitToView, followPlayer, hereRoom, centerOn, mode])
   useEffect(() => {
-    if (followPlayer && hereRoom && fittedFor.current === area?.image) centerOn(hereRoom)
+    if (mode === 'local' && followPlayer && hereRoom && fittedFor.current === area?.image) centerOn(hereRoom)
   }, [hereRoom?.id]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Switching views: Global remembers where you left it; on first open it
+  // centres on the area you're in. Local re-fits its area when you come back.
+  const globalTfRef = useRef<Transform | null>(null)
+  const localTfRef = useRef<Transform | null>(null)
+  function switchMode(next: 'local' | 'global') {
+    if (next === mode) return
+    if (mode === 'global') globalTfRef.current = transform
+    else localTfRef.current = transform
+    setMode(next)
+  }
+  useEffect(() => {
+    const svg = svgRef.current
+    if (!svg) return
+    if (mode === 'global' && world) {
+      if (globalTfRef.current) { setTransform(globalTfRef.current); return }
+      const W = svg.clientWidth || 800, H = svg.clientHeight || 600
+      const here = hereImage ? world.byImage.get(hereImage) : undefined
+      if (here) {
+        const sc = 0.9
+        setTransform({ scale: sc, x: W / 2 - (here.x + G_CELL / 2) * sc, y: H / 2 - (here.y + G_CELL / 2) * sc })
+      } else {
+        const sc = Math.max(MIN_SCALE, (W - 40) / world.w)
+        setTransform({ scale: sc, x: (W - world.w * sc) / 2, y: 20 })
+      }
+    } else if (mode === 'local') {
+      if (localTfRef.current && fittedFor.current === area?.image) setTransform(localTfRef.current)
+    }
+  }, [mode, world]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  function openArea(image: string) {
+    setAreaImage(image)
+    setFollowPlayer(image === hereImage)
+    localTfRef.current = null
+    setMode('local')
+  }
 
   // Wheel zoom around the cursor. Native listener so preventDefault works.
   useEffect(() => {
@@ -171,7 +260,7 @@ export default function DaMapsView({ lichDb, imageIndex, currentRoom, character,
   const [showPanel, setShowPanel] = useState(true)
   const [tab, setTab] = useState<'legend' | 'room'>('room')
   const [indoorMode, setIndoorMode] = useState<'auto' | 'all'>('auto')
-  useEffect(() => { setHoverId(null); setHoverBuilding(null); setPinnedId(null) }, [areaImage])
+  useEffect(() => { setHoverId(null); setHoverBuilding(null); setPinnedId(null); setHoverArea(null) }, [areaImage, mode])
 
   const showIndoor = indoorMode === 'all' || transform.scale >= INDOOR_SCALE
 
@@ -250,11 +339,6 @@ export default function DaMapsView({ lichDb, imageIndex, currentRoom, character,
             }}
             onContextMenu={e => { e.preventDefault(); onSendCommand(`;go2 ${r.id}`) }}
           />
-          {r.crossTo.length > 0 && (
-            <rect x={r.x - s / 2 - 2} y={r.y - s / 2 - 2} width={s + 4} height={s + 4} fill="none"
-              stroke="var(--map-arc-special, #ffb74d)" strokeWidth={1} strokeDasharray="2 1.5"
-              vectorEffect="non-scaling-stroke" pointerEvents="none" />
-          )}
         </g>
       )
     })
@@ -285,6 +369,76 @@ export default function DaMapsView({ lichDb, imageIndex, currentRoom, character,
       strokeWidth={1.5} vectorEffect="non-scaling-stroke" pointerEvents="none" />
   }
 
+  // ── Global view: every area as a thumbnail of all its rooms ──────────────
+  const globalLayer = useMemo(() => {
+    if (!world) return null
+    return (
+      <>
+        {world.heads.map(h => (
+          <text key={h.name} x={0} y={h.y} fontSize={30} fontStyle="italic" fill="var(--map-text, #ccc)"
+            pointerEvents="none" style={{ fontFamily: 'var(--font-mono, monospace)' }}>{h.name}</text>
+        ))}
+        {world.areas.map(wa => {
+          const byFill = new Map<string, string[]>()
+          for (const r of wa.area.rooms) {
+            const fill = r.category ? DA_CATEGORIES[r.category].color : 'var(--map-node-stroke, #555)'
+            const sz = Math.max(r.size, 2 / wa.s)
+            if (!byFill.has(fill)) byFill.set(fill, [])
+            byFill.get(fill)!.push(`M${r.x - sz / 2},${r.y - sz / 2}h${sz}v${sz}h${-sz}z`)
+          }
+          const arcs = wa.area.arcs.map(a => {
+            const p = wa.area.byId.get(a.a)!, q = wa.area.byId.get(a.b)!
+            return `M${p.x},${p.y}L${q.x},${q.y}`
+          }).join('')
+          return (
+            <g key={wa.image}>
+              <rect x={wa.x + 4} y={wa.y + 4} width={G_CELL - 8} height={G_CELL - 8} rx={6}
+                fill="var(--map-node-fill, #222)" fillOpacity={0.35}
+                stroke="var(--map-border, #444)" strokeWidth={1} vectorEffect="non-scaling-stroke"
+                style={{ cursor: 'pointer' }}
+                onMouseEnter={() => { if (!dragRef.current?.moved) setHoverArea(wa.image) }}
+                onClick={() => { if (!dragRef.current?.moved) openArea(wa.image) }} />
+              <g transform={`translate(${wa.ox} ${wa.oy}) scale(${wa.s})`} pointerEvents="none">
+                <path d={arcs} stroke="var(--map-arc-cardinal, #666)" strokeWidth={1} fill="none"
+                  vectorEffect="non-scaling-stroke" opacity={0.7} />
+                {[...byFill].map(([fill, d]) => <path key={fill} d={d.join('')} fill={fill} />)}
+              </g>
+              <text x={wa.x + G_CELL / 2} y={wa.y + G_CELL - 12} fontSize={13} textAnchor="middle"
+                fill="var(--map-text-muted, #999)" pointerEvents="none"
+                style={{ fontFamily: 'var(--font-mono, monospace)' }}>
+                {(n => n.length > 30 ? n.slice(0, 29) + '…' : n)(shortAreaName(wa.name))}
+              </text>
+            </g>
+          )
+        })}
+      </>
+    )
+  }, [world]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const globalHere = (() => {
+    if (!world || !currentRoom || !hereImage) return null
+    const wa = world.byImage.get(hereImage)
+    const r = wa?.area.byId.get(currentRoom.id)
+    if (!wa || !r) return null
+    const cx = wa.ox + r.x * wa.s, cy = wa.oy + r.y * wa.s
+    return (
+      <g pointerEvents="none">
+        <rect x={wa.x + 4} y={wa.y + 4} width={G_CELL - 8} height={G_CELL - 8} rx={6} fill="none"
+          stroke="var(--map-current-color, #2fd08a)" strokeWidth={2} vectorEffect="non-scaling-stroke" />
+        <circle cx={cx} cy={cy} r={9} fill="none" stroke="var(--map-current-color, #2fd08a)" strokeWidth={2} vectorEffect="non-scaling-stroke" />
+        <circle cx={cx} cy={cy} r={3} fill="var(--map-current-color, #2fd08a)" />
+      </g>
+    )
+  })()
+  const globalHover = (() => {
+    if (!world || !hoverArea) return null
+    const wa = world.byImage.get(hoverArea)
+    if (!wa) return null
+    return <rect x={wa.x + 4} y={wa.y + 4} width={G_CELL - 8} height={G_CELL - 8} rx={6} fill="none"
+      stroke="var(--map-text, #eee)" strokeWidth={1.5} vectorEffect="non-scaling-stroke" pointerEvents="none" />
+  })()
+  const hoveredWorldArea = world && hoverArea ? world.byImage.get(hoverArea) : undefined
+
   const hereIndicator = hereRoom && (
     <g pointerEvents="none">
       {!showIndoor && hereRoom.indoor && hereRoom.building !== null && (() => {
@@ -310,10 +464,11 @@ export default function DaMapsView({ lichDb, imageIndex, currentRoom, character,
   const shownBuilding = hoverBuilding !== null && pinnedId === null && area ? area.buildings[hoverBuilding] : undefined
 
   const presentCats = useMemo(() => {
+    if (mode === 'global') return Object.keys(DA_CATEGORIES)
     if (!area) return []
     const s = new Set(area.rooms.map(r => r.category).filter((c): c is string => !!c))
     return Object.keys(DA_CATEGORIES).filter(k => s.has(k))
-  }, [area])
+  }, [area, mode])
   const presentArcs = useMemo(() => {
     if (!area) return []
     const s = new Set(area.arcs.map(a => a.cat))
@@ -374,7 +529,7 @@ export default function DaMapsView({ lichDb, imageIndex, currentRoom, character,
         {foundItems.map(([item, f]) => (
           <div key={item}>· {item} <span style={muted}>(found {f.n}×)</span></div>
         ))}
-        {lichForage.map(item => <div key={item}>· {item} <span style={muted}>(Lich)</span></div>)}
+        {lichForage.map(item => <div key={item}>· {item}</div>)}
 
         {r.hunting.length > 0 && (
           <>
@@ -386,15 +541,6 @@ export default function DaMapsView({ lichDb, imageIndex, currentRoom, character,
           <>
             <div style={sectionHead}>Here</div>
             <div>{r.services.join(', ')}</div>
-          </>
-        )}
-        {r.crossTo.length > 0 && (
-          <>
-            <div style={sectionHead}>Leads to</div>
-            {r.crossTo.map(img => (
-              <button key={img} className="map-btn map-btn--sm" style={{ marginRight: 4, marginBottom: 4 }}
-                onClick={() => { setFollowPlayer(false); setAreaImage(img) }}>↗ {areaDisplayName(img)}</button>
-            ))}
           </>
         )}
         <div style={sectionHead}>Exits</div>
@@ -412,15 +558,14 @@ export default function DaMapsView({ lichDb, imageIndex, currentRoom, character,
   return (
     <div className="map-canvas-wrap" style={{ display: 'flex', flexDirection: 'column', minHeight: 0 }}>
       <div className="map-toolbar" style={{ flexShrink: 0 }}>
-        <select className="map-select" aria-label="Area" style={{ minWidth: 200 }}
-          title="Area — follows you automatically as you move; pick one to browse it"
-          value={areaImage}
-          onChange={e => { setFollowPlayer(false); setAreaImage(e.target.value) }}>
-          <option value="">— Browse an area —</option>
-          {areaList.map(a => <option key={a.image} value={a.image}>{a.name} ({a.count})</option>)}
-        </select>
+        <button className={`map-btn map-btn--sm${mode === 'local' ? ' map-btn--active' : ''}`}
+          onClick={() => switchMode('local')} title="Local — the area you're in (or the one you opened from Global)">Local</button>
+        <button className={`map-btn map-btn--sm${mode === 'global' ? ' map-btn--active' : ''}`}
+          onClick={() => switchMode('global')} title="Global — every area, grouped by province. Click one to open it.">Global</button>
         <span className="map-toolbar-location">
-          {hereRoom ? '📍 here' : hereImage ? `📍 ${areaDisplayName(hereImage)}` : ''}
+          {mode === 'global'
+            ? 'All areas'
+            : area ? `${area.name}${hereRoom ? ' · 📍 here' : ''}` : ''}
         </span>
       </div>
 
@@ -430,13 +575,23 @@ export default function DaMapsView({ lichDb, imageIndex, currentRoom, character,
           title={hereImage ? 'Take me to my current room (enables follow)' : 'Your current room has no Da\'Maps position'}
           onClick={() => {
             setFollowPlayer(true)
+            if (mode === 'global') { localTfRef.current = null; setMode('local') }
             if (hereImage !== areaImage) setAreaImage(hereImage)
             else if (hereRoom) centerOn(hereRoom, INDOOR_SCALE)
           }}>◆</button>
-        <button className="map-btn" onClick={() => { setFollowPlayer(false); fitToView() }} title="Fit area to view">⊡</button>
+        <button className="map-btn" title={mode === 'global' ? 'Fit all areas to view' : 'Fit area to view'}
+          onClick={() => {
+            setFollowPlayer(false)
+            if (mode === 'global' && world && svgRef.current) {
+              const W = svgRef.current.clientWidth, H = svgRef.current.clientHeight
+              const sc = Math.max(MIN_SCALE, Math.min((W - 40) / world.w, (H - 40) / world.h))
+              setTransform({ scale: sc, x: (W - world.w * sc) / 2, y: 20 })
+            } else fitToView()
+          }}>⊡</button>
         <button className={`map-btn${showPanel ? ' map-btn--active' : ''}`} onClick={() => setShowPanel(s => !s)}
           title={showPanel ? 'Hide the side panel' : 'Show the side panel (legend and room details)'}>▤</button>
         <button className={`map-btn${indoorMode === 'all' ? ' map-btn--active' : ''}`}
+          disabled={mode === 'global'}
           onClick={() => setIndoorMode(m => (m === 'all' ? 'auto' : 'all'))}
           title={indoorMode === 'all' ? 'Indoor rooms: always shown (click for zoom-based)' : 'Indoor rooms: shown when zoomed in (click to always show)'}>⌂</button>
         <span style={{ flex: 1 }} />
@@ -449,12 +604,12 @@ export default function DaMapsView({ lichDb, imageIndex, currentRoom, character,
       )}
 
       <div style={{ flex: 1, overflow: 'hidden', position: 'relative' }}>
-        {!area && (
+        {mode === 'local' && !area && (
           <div className="map-overlay" style={{ pointerEvents: 'none' }}>
             <div className="map-empty">
               <div className="map-empty-icon">🗺</div>
-              <div className="map-empty-msg">{areaList.length} areas · waiting for your room</div>
-              <div className="map-empty-sub">Move or LOOK in game, or pick an area above to browse.</div>
+              <div className="map-empty-msg">Waiting for your room</div>
+              <div className="map-empty-sub">Move or LOOK in game, or open Global to pick an area.</div>
             </div>
           </div>
         )}
@@ -464,17 +619,27 @@ export default function DaMapsView({ lichDb, imageIndex, currentRoom, character,
           onMouseLeave={endDrag}  // hover is sticky: the panel keeps the last room while you read it
           onContextMenu={e => e.preventDefault()}>
           <g transform={`translate(${transform.x} ${transform.y}) scale(${transform.scale})`}>
-            {arcPaths}
-            {buildingShapes}
-            {labels}
-            {roomRects}
-            {highlight(pinnedId, 'var(--map-select-color, #e0a050)')}
-            {highlight(hoverId, 'var(--map-text, #eee)')}
-            {hereIndicator}
+            {mode === 'global' ? (
+              <>
+                {globalLayer}
+                {globalHover}
+                {globalHere}
+              </>
+            ) : (
+              <>
+                {arcPaths}
+                {buildingShapes}
+                {labels}
+                {roomRects}
+                {highlight(pinnedId, 'var(--map-select-color, #e0a050)')}
+                {highlight(hoverId, 'var(--map-text, #eee)')}
+                {hereIndicator}
+              </>
+            )}
           </g>
         </svg>
 
-        {showPanel && area && (
+        {showPanel && (mode === 'global' || area) && (
           <div style={{
             position: 'absolute', top: 8, right: 8, bottom: 8, width: PANEL_W, maxWidth: '45%',
             display: 'flex', flexDirection: 'column',
@@ -509,12 +674,6 @@ export default function DaMapsView({ lichDb, imageIndex, currentRoom, character,
                   <div style={sectionHead}>Other</div>
                   <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, marginBottom: 3 }}>
                     <svg width={14} height={14} style={{ flexShrink: 0, alignSelf: 'center' }}>
-                      <rect x={2} y={2} width={10} height={10} fill="none" stroke="var(--map-arc-special, #ffb74d)" strokeDasharray="2 1.5" />
-                    </svg>
-                    <span style={muted}>Leads to another area (see the Room tab)</span>
-                  </div>
-                  <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, marginBottom: 3 }}>
-                    <svg width={14} height={14} style={{ flexShrink: 0, alignSelf: 'center' }}>
                       <rect x={1} y={1} width={12} height={12} fill="var(--map-node-fill, #2a2a2a)" stroke="var(--map-node-stroke, #555)" />
                     </svg>
                     <span style={muted}>Building — zoom in (or ⌂) to see its rooms</span>
@@ -522,7 +681,19 @@ export default function DaMapsView({ lichDb, imageIndex, currentRoom, character,
                   <div style={{ ...muted, marginTop: 8 }}>Right-click any room to <code>;go2</code> there.</div>
                 </>
               )}
-              {tab === 'room' && (
+              {tab === 'room' && mode === 'global' && (
+                hoveredWorldArea ? (
+                  <>
+                    <div style={{ ...muted, fontSize: '0.91em' }}>hovered area</div>
+                    <div style={{ fontWeight: 'bold', marginTop: 2 }}>{hoveredWorldArea.name}</div>
+                    <div style={muted}>{hoveredWorldArea.province} · {hoveredWorldArea.rooms} rooms</div>
+                    <div style={{ ...muted, marginTop: 8, fontStyle: 'italic' }}>Click to open it in Local</div>
+                  </>
+                ) : (
+                  <div style={muted}>Hover an area to see what it is. Click one to open it.</div>
+                )
+              )}
+              {tab === 'room' && mode === 'local' && (
                 shownBuilding ? (
                   <>
                     <div style={{ ...muted, fontSize: '0.91em' }}>hovered building</div>
@@ -552,7 +723,9 @@ export default function DaMapsView({ lichDb, imageIndex, currentRoom, character,
 
       <div style={{ flexShrink: 0, padding: '4px 8px', fontSize: 11, color: 'var(--map-text-muted, #888)',
         borderTop: '1px solid var(--map-border-subtle, #333)' }}>
-        {DA_MAPS_NAME}{area ? ` · ${area.name} · ${area.rooms.length} rooms` : ''} · {areaList.length} areas
+        {DA_MAPS_NAME}{mode === 'global'
+          ? (world ? ` · ${world.areas.length} areas · ${world.areas.reduce((n, a) => n + a.rooms, 0)} rooms` : '')
+          : (area ? ` · ${area.name} · ${area.rooms.length} rooms` : '')}
       </div>
     </div>
   )

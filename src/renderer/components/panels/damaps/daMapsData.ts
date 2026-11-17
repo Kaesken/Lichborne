@@ -154,6 +154,32 @@ export function areaDisplayName(image: string): string {
   return s.replace(/\b([a-z])/g, c => c.toUpperCase())
 }
 
+// ── Provinces (for the Global view) ─────────────────────────────────────────
+
+export const PROVINCE_ORDER = ['Zoluren', 'Therengia', 'Ilithi', 'Forfedhdar', "Qi'Reshalia", 'Taisidon', 'Other']
+
+const PROVINCE_BY_PREFIX: Record<string, string> = {
+  zoluren: 'Zoluren', therengia: 'Therengia', forfedhdar: 'Forfedhdar',
+  ilithi: 'Ilithi', ilitha: 'Ilithi', ilithia: 'Ilithi', illithi: 'Ilithi',
+  qi: "Qi'Reshalia", taisidon: 'Taisidon',
+}
+
+/** Which province an area belongs to: the tile name's prefix, else its rooms' location. */
+export function areaProvince(image: string, rooms: LichRoom[]): string {
+  const prefix = image.split(/[,\-_ ]/)[0].trim().toLowerCase()
+  if (PROVINCE_BY_PREFIX[prefix]) return PROVINCE_BY_PREFIX[prefix]
+  const counts = new Map<string, number>()
+  for (const r of rooms) {
+    const l = (r.location ?? '').trim()
+    if (l) counts.set(l, (counts.get(l) ?? 0) + 1)
+  }
+  for (const [loc] of [...counts].sort((x, y) => y[1] - x[1])) {
+    const hit = PROVINCE_ORDER.find(p => p.toLowerCase() === loc.toLowerCase())
+    if (hit) return hit
+  }
+  return 'Other'
+}
+
 function buildingName(title: string): string {
   const i = title.indexOf(',')
   return (i > 0 ? title.slice(0, i) : title).trim()
@@ -218,7 +244,8 @@ export function buildArea(image: string, rooms: LichRoom[], lichDb: Map<number, 
       x: (x1 + x2) / 2,
       y: (y1 + y2) / 2,
       // Lich tiles draw ~16px rooms; 70% of that leaves the Genie-style gaps.
-      size: Math.max(6, Math.min(w || 12, h || 12) * 0.7),
+      // (capped: a few rooms carry a whole-tile rect in image_coords)
+      size: Math.max(6, Math.min(24, Math.min(w || 12, h || 12) * 0.7)),
       title: lichTitle(r),
       indoor: isIndoor(r),
       category: category ?? (swim ? 'water' : null),
