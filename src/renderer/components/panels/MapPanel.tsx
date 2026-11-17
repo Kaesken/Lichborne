@@ -28,6 +28,8 @@ import { useCharacter } from '../../CharacterContext'
 import { useProfileSaver } from '../../hooks/useProfileSaver'
 import MapImageView from './MapImageView'
 import GenieMapView, { type GenieMatch } from './GenieMapView'
+import DaMapsView from './DaMapsView'
+import { DA_MAPS_NAME, daMapsSetRoom } from './damaps/daMapsData'
 import type { GameFamily } from '../../../shared/types'
 import { useSessionLichPath } from '../../sessionLich'
 import '../../styles/map-panel.css'
@@ -192,11 +194,11 @@ export default memo(function MapPanel({ roomTitle = '', roomDesc = '', roomExits
   // character is FORCED to 'image' regardless of a saved 'genie' preference
   // (e.g. one that arrived via Profile Transfer's Panel Layout category from
   // a DR character) — checked first, before the normal saved-value read.
-  const [viewMode, setViewMode] = useState<'image' | 'genie'>(() => {
+  const [viewMode, setViewMode] = useState<'image' | 'genie' | 'damaps'>(() => {
     if (isGS4) return 'image'
     try {
       const v = localStorage.getItem(scopedKey(character, 'mapViewMode'))
-      if (v === 'image' || v === 'genie') return v
+      if (v === 'image' || v === 'genie' || v === 'damaps') return v
       if (v === 'graph' || v === 'lich-graph') return 'genie'  // migrate legacy selection
       return 'image'
     } catch { return 'image' }
@@ -340,6 +342,12 @@ export default memo(function MapPanel({ roomTitle = '', roomDesc = '', roomExits
     const h = setTimeout(() => setCurrentRoom(undefined), 400)
     return () => clearTimeout(h)
   }, [roomTitle, roomDesc, roomId, dbStatus, lichDb])
+
+  // Da'Maps: tell the PERCEIVE / FORAGE capture which Lich room this character
+  // is standing in, so a reading is filed under the right room.
+  useEffect(() => {
+    daMapsSetRoom(character, currentRoom?.id)
+  }, [character, currentRoom])
 
   // ── Load Genie XML progressively ─────────────────────────────────────────────
   //
@@ -490,6 +498,16 @@ export default memo(function MapPanel({ roomTitle = '', roomDesc = '', roomExits
                 title="Genie Maps — community-maintained XML map files"
               >Genie Maps</button>
             )}
+            {!isGS4 && (
+              <button
+                className={`map-btn map-btn--sm${viewMode === 'damaps' ? ' map-btn--active' : ''}`}
+                onClick={() => setViewMode('damaps')}
+                disabled={dbStatus !== 'ready'}
+                title={dbStatus === 'ready'
+                  ? `${DA_MAPS_NAME} — Lich map data in the Genie style, with mana and forage`
+                  : `${DA_MAPS_NAME} needs the Lich map database`}
+              >{DA_MAPS_NAME}</button>
+            )}
             <button
               className="map-btn map-btn--sm"
               // force — this is the user explicitly asking for a re-read, so it
@@ -525,7 +543,7 @@ export default memo(function MapPanel({ roomTitle = '', roomDesc = '', roomExits
       )}
 
       {/* Image tab error (Lich not available) */}
-      {dbStatus === 'error' && viewMode === 'image' && (
+      {dbStatus === 'error' && (viewMode === 'image' || viewMode === 'damaps') && (
         <div className="map-canvas-wrap">
           {dbError === 'no-lich-path' && (
             <div className="map-empty">
@@ -562,6 +580,15 @@ export default memo(function MapPanel({ roomTitle = '', roomDesc = '', roomExits
           roomId={roomId}
           onSendCommand={onSendCommand}
           onShowGenie={() => setViewMode('genie')}
+        />
+      )}
+      {dbStatus === 'ready' && viewMode === 'damaps' && (
+        <DaMapsView
+          lichDb={lichDb}
+          imageIndex={imageIndex}
+          currentRoom={currentRoom}
+          character={character}
+          onSendCommand={onSendCommand}
         />
       )}
       {viewMode === 'genie' && (dbStatus === 'ready' || dbStatus === 'error') && (

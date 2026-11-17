@@ -4209,6 +4209,25 @@ Player Housing (`#00FFFF`) was in `AURA_FIRE_COLORS` (hearth-glow flicker) throu
 
 When an animated aura class is applied, the `opacity` SVG attribute is omitted (`undefined`) so CSS owns opacity unambiguously — having both an attribute and a CSS animation on the same property creates browser-inconsistency.
 
+### 19.18 Da'Maps View (DaMapsView) *(experimental)*
+
+A third map mode, beside Lich Map and Genie Maps. Files: [DaMapsView.tsx](../src/renderer/components/panels/DaMapsView.tsx), [damaps/daMapsData.ts](../src/renderer/components/panels/damaps/daMapsData.ts). The name lives in one constant, `DA_MAPS_NAME`.
+
+**Data — Lich only, no Genie.** Rooms, ids, exits and travel are Lich's (`;go2 <id>` on right-click). Positions are each room's hand-placed `image_coords` on its Lich tile (the centre of the rect), one tile = one "area", so there is NO auto-layout — the lesson of §19.15. Rooms without `image_coords` are not drawn; standing in one shows a "no Da'Maps position yet" strip.
+
+**Derived from Lich fields:**
+- indoor/outdoor — `paths[0]` starts "Obvious exits" (indoor) vs "Obvious paths" (outdoor)
+- room colour — a category from `tags` (`npchealer`, guild names, stat names, `bank`, shop tags, `portal`…), using the COLOR_LEGEND hexes; `swim` exits → water
+- forage — plain tags; hunting areas — snake_case tags
+- buildings — connected groups of indoor rooms; named by their most common title prefix
+- labels — a room that leads to another tile is labelled with the destination's name; a categorised outdoor room with its own name
+
+**Semantic zoom.** Below `INDOOR_SCALE` each building is one filled outline (hover = building info, right-click = go2 its entrance); at or above it, its rooms are drawn inside a dashed outline. The ⌂ button forces indoor rooms on.
+
+**Side panel.** Tabs "Map legend" / "Room". The Room tab follows the hovered room (sticky — it keeps the last room when the pointer leaves the map), a left-click pins a room, and with nothing hovered it shows the player's room. It lists mana per room-based realm (Life/Holy/Elemental/Arcane; Lunar is time-based, not room-based), forage (player finds + Lich tags), hunting, services, exits and cross-area links.
+
+**Mana / forage capture.** `GameWindow` calls `daMapsObserveCommand` from `noteSentRef` and `daMapsObserveLine` for each main-stream line; both are no-ops unless PERCEIVE / FORAGE was sent in the last 10 s. Readings are filed under the room `MapPanel` last resolved (`daMapsSetRoom`) and stored in `localStorage['lichborne.damaps.observations.v1']` (shared across characters — it describes the world). The mana words are Elanthipedia's >75-attunement table; the line patterns are a first guess and need checking against real game text.
+
 ### 19.12 Future Work
 
 | Item | Notes |
