@@ -13,6 +13,7 @@
 // mana readings and successful forages, captured from the game text by
 // `daMapsObserveLine` / `daMapsObserveCommand` (called from GameWindow).
 
+import { segHitsBox } from './daMapsLayout'
 import type { LichRoom } from '../mapTypes'
 import { lichTitle } from '../mapTypes'
 import { scopedKey } from '../../../characterScope'
@@ -124,6 +125,8 @@ export interface DaRoom {
   exits:    string[]         // wayto commands, as Lich lists them
   crossTo:  string[]         // other area tiles this room leads to
   label:    string           // place name drawn beside the room ('' = none)
+  lx:       number           // where the label goes (text start, baseline)
+  ly:       number
   building: number | null    // index into DaArea.buildings (indoor rooms only)
   location: string
 }
@@ -134,6 +137,8 @@ export interface DaBuilding {
   name:  string
   rooms: number[]
   x1: number; y1: number; x2: number; y2: number
+  outline: boolean   // false when a dotted box would overlap other rooms or boxes
+  lx: number; ly: number; showLabel: boolean
 }
 
 export interface DaArea {
@@ -219,16 +224,27 @@ function splitTags(tags: string[] | undefined): { forage: string[]; hunting: str
  */
 export function buildArea(
   image: string, rooms: LichRoom[], lichDb: Map<number, LichRoom>,
-  layout?: { coords: Map<number, [number, number, number, number]>; areaOf: Map<number, string> },
+  layout?: { pos: Map<number, [number, number]>; size: Map<number, number>; areaOf: Map<number, string> },
 ): DaArea {
   const placed: DaRoom[] = []
   const byId = new Map<number, DaRoom>()
 
   for (const r of rooms) {
-    const c = layout?.coords.get(r.id) ?? r.image_coords
-    if (!c || c.length < 4) continue
-    const [x1, y1, x2, y2] = c
-    const w = Math.abs(x2 - x1), h = Math.abs(y2 - y1)
+    let cx: number, cy: number, size: number
+    const lp = layout?.pos.get(r.id)
+    if (layout) {
+      if (!lp) continue
+      ;[cx, cy] = lp
+      size = layout.size.get(r.id) ?? 11
+    } else {
+      const c = r.image_coords
+      if (!c || c.length < 4) continue
+      const [x1, y1, x2, y2] = c
+      const w = Math.abs(x2 - x1), h = Math.abs(y2 - y1)
+      cx = (x1 + x2) / 2; cy = (y1 + y2) / 2
+      // Lich tiles draw ~16px rooms; 70% of that leaves the Genie-style gaps.
+      size = Math.max(6, Math.min(24, Math.min(w || 12, h || 12) * 0.7))
+    }
     const { forage, hunting, services, category } = splitTags(r.tags)
     // A few wayto values in the map DB are null (scripted moves Lich couldn't
     // serialize); keep only real command strings.
@@ -246,11 +262,8 @@ export function buildArea(
     }
     const room: DaRoom = {
       id: r.id,
-      x: (x1 + x2) / 2,
-      y: (y1 + y2) / 2,
-      // Lich tiles draw ~16px rooms; 70% of that leaves the Genie-style gaps.
-      // (capped: a few rooms carry a whole-tile rect in image_coords)
-      size: Math.max(6, Math.min(24, Math.min(w || 12, h || 12) * 0.7)),
+      x: cx, y: cy, size,
+      lx: 0, ly: 0,
       title: lichTitle(r),
       indoor: isIndoor(r),
       category: category ?? (swim ? 'water' : null),
@@ -284,7 +297,7 @@ export function buildArea(
       room.label = ''
       continue
     }
-    const near = kept.some(k => k.label === name && Math.hypot(k.x - room.x, k.y - room.y) < 80)
+    const near = kept.some(k => k.label === name && Math.hypot(k.x - room.x, k.y - room.y) < (layout ? 200 : 80))
     room.label = near ? '' : name
     if (room.label) kept.push(room)
   }
@@ -292,7 +305,7 @@ export function buildArea(
   // Arcs inside the area, de-duplicated. Very long lines are skipped (portal /
   // "go" exits whose far end sits across the tile) — they're walkable but would
   // just draw a line across the map, the same reason Genie hides such arcs.
-  const MAX_ARC = 260
+  const MAX_ARC = layout ? 650 : 260
   const seen = new Set<string>()
   const arcs: DaArc[] = []
   for (const r of rooms) {
@@ -350,7 +363,7 @@ export function buildArea(
     const name = [...names.entries()].sort((p, q) => q[1] - p[1])[0]?.[0] ?? ''
     const pad = 4
     const b: DaBuilding = {
-      name,
+      name, outline: true, lx: 0, ly: 0, showLabel: false,
       rooms: members.map(m => m.id),
       x1: Math.min(...members.map(m => m.x - m.size / 2)) - pad,
       y1: Math.min(...members.map(m => m.y - m.size / 2)) - pad,
@@ -359,10 +372,16 @@ export function buildArea(
     }
     // One-room shops are just a square (like Genie); an outline that would
     // span a big part of the map means the rooms aren't really one building.
-    if (members.length < 2 || b.x2 - b.x1 > 300 || b.y2 - b.y1 > 300) continue
+    if (members.length < 2) continue
     const idx = buildings.push(b) - 1
     for (const m of members) m.building = idx
   }
+
+  // Nothing may overlap: a line that would run through a room it doesn't
+  // connect is left out (the exit still works for go2), then outlines and
+  // labels are fitted around what's left.
+  const visibleArcs = dropArcsThroughRooms(arcs, placed, byId)
+  placeLabelsAndOutlines(placed, buildings, visibleArcs, byId)
 
   const bbox = placed.length
     ? {
@@ -371,7 +390,7 @@ export function buildArea(
       }
     : { x1: 0, y1: 0, x2: 100, y2: 100 }
 
-  return { image, name: areaDisplayName(image), rooms: placed, byId, arcs, buildings, bbox }
+  return { image, name: areaDisplayName(image), rooms: placed, byId, arcs: visibleArcs, buildings, bbox }
 }
 
 // ── Observations: mana + forage seen by players (local store) ─────────────────
@@ -491,4 +510,149 @@ export function daMapsObserveLine(character: string, line: string): void {
       pendingForage.delete(character)
     }
   }
+}
+
+// ── No-overlap pass: building outlines and labels ────────────────────────────
+
+const LABEL_FONT = 9
+const CHAR_W = LABEL_FONT * 0.6
+type Box = [number, number, number, number]   // x1, y1, x2, y2
+
+function boxesHit(a: Box, b: Box, pad = 0): boolean {
+  return a[0] < b[2] + pad && b[0] < a[2] + pad && a[1] < b[3] + pad && b[1] < a[3] + pad
+}
+
+/** Grid of boxes for overlap tests. */
+class BoxGrid {
+  private cells = new Map<string, Box[]>()
+  constructor(private cell = 40) {}
+  private keys(b: Box): string[] {
+    const out: string[] = []
+    for (let x = Math.floor(b[0] / this.cell); x <= Math.floor(b[2] / this.cell); x++)
+      for (let y = Math.floor(b[1] / this.cell); y <= Math.floor(b[3] / this.cell); y++) out.push(x + ',' + y)
+    return out
+  }
+  add(b: Box) { for (const k of this.keys(b)) { if (!this.cells.has(k)) this.cells.set(k, []); this.cells.get(k)!.push(b) } }
+  /** every stored box whose cells overlap `b` (may repeat) */
+  within(b: Box): Box[] {
+    const out = new Set<Box>()
+    for (const k of this.keys(b)) for (const o of this.cells.get(k) ?? []) out.add(o)
+    return [...out]
+  }
+  hits(b: Box, pad = 0): boolean {
+    for (const k of this.keys(b)) for (const o of this.cells.get(k) ?? []) if (boxesHit(b, o, pad)) return true
+    return false
+  }
+}
+
+/**
+ * Nothing on the map may overlap. A building's dotted outline is only drawn
+ * when it wraps no other room and touches no other outline; each label goes
+ * in the first spot around its room/building that's clear of every room
+ * square and every other label, or isn't drawn.
+ */
+function dropArcsThroughRooms(arcs: DaArc[], rooms: DaRoom[], byId: Map<number, DaRoom>): DaArc[] {
+  const grid = new BoxGrid()
+  const boxes = new Map<Box, DaRoom>()
+  for (const r of rooms) {
+    const b: Box = [r.x - r.size / 2, r.y - r.size / 2, r.x + r.size / 2, r.y + r.size / 2]
+    grid.add(b); boxes.set(b, r)
+  }
+  return arcs.filter(arc => {
+    const p = byId.get(arc.a)!, q = byId.get(arc.b)!
+    const seg: [number, number, number, number] = [p.x, p.y, q.x, q.y]
+    for (const b of grid.within([Math.min(p.x, q.x), Math.min(p.y, q.y), Math.max(p.x, q.x), Math.max(p.y, q.y)])) {
+      const r = boxes.get(b)!
+      if (r.id === p.id || r.id === q.id) continue
+      if (segHitsBox(seg, r.x, r.y, r.size / 2)) return false
+    }
+    return true
+  })
+}
+
+function placeLabelsAndOutlines(rooms: DaRoom[], buildings: DaBuilding[], arcs: DaArc[], byId: Map<number, DaRoom>) {
+  const roomGrid = new BoxGrid()
+  const roomBox = (r: DaRoom): Box => [r.x - r.size / 2, r.y - r.size / 2, r.x + r.size / 2, r.y + r.size / 2]
+  for (const r of rooms) roomGrid.add(roomBox(r))
+
+  // Outlines, smallest first so a small building wins over a sprawling one.
+  const outlineGrid = new BoxGrid(80)
+  const order = buildings.map((_, i) => i).sort((a, b) => {
+    const A = buildings[a], B = buildings[b]
+    return (A.x2 - A.x1) * (A.y2 - A.y1) - (B.x2 - B.x1) * (B.y2 - B.y1)
+  })
+  const members = new Map<number, Set<number>>()
+  buildings.forEach((b, i) => members.set(i, new Set(b.rooms)))
+  for (const i of order) {
+    const b = buildings[i]
+    const box: Box = [b.x1, b.y1, b.x2, b.y2]
+    const mine = members.get(i)!
+    const foreign = rooms.some(r => !mine.has(r.id) && boxesHit(roomBox(r), box, 1))
+    b.outline = !foreign && !outlineGrid.hits(box, 2)
+    if (b.outline) outlineGrid.add(box)
+  }
+
+  const labelGrid = new BoxGrid()
+  // Lines, as boxes along their length, so labels can be kept off them.
+  const lineSegs: [number, number, number, number][] = arcs.map(a => {
+    const p = byId.get(a.a)!, q = byId.get(a.b)!
+    return [p.x, p.y, q.x, q.y]
+  })
+  const lineGrid = new BoxGrid()
+  const segOf = new Map<Box, [number, number, number, number]>()
+  for (const sg of lineSegs) {
+    const b: Box = [Math.min(sg[0], sg[2]), Math.min(sg[1], sg[3]), Math.max(sg[0], sg[2]), Math.max(sg[1], sg[3])]
+    lineGrid.add(b); segOf.set(b, sg)
+  }
+  const onLine = (box: Box) => lineGrid.within(box).some(b => segHitsRect(segOf.get(b)!, box))
+  const outlineBoxes: Box[] = buildings.filter(b => b.outline).map(b => [b.x1, b.y1, b.x2, b.y2])
+  const onOutline = (box: Box) => outlineBoxes.some(o => boxesHit(box, o) && !(box[0] > o[0] && box[2] < o[2] && box[1] > o[1] && box[3] < o[3]))
+  const fits = (box: Box) => !roomGrid.hits(box, 1.5) && !labelGrid.hits(box, 2) && !onLine(box) && !onOutline(box)
+  const tryPlace = (text: string, spots: [number, number][]): [number, number] | null => {
+    const w = text.length * CHAR_W, h = LABEL_FONT
+    for (const [x, y] of spots) {
+      const box: Box = [x, y - h + 1, x + w, y + 2]
+      if (fits(box)) { labelGrid.add(box); return [x, y] }
+    }
+    return null
+  }
+
+  // Building names first (they name a whole group), then room landmarks.
+  for (const b of buildings) {
+    if (!b.name) continue
+    const w = b.name.length * CHAR_W
+    const at = tryPlace(b.name, [
+      [b.x1, b.y2 + LABEL_FONT], [b.x1, b.y1 - 3],
+      [b.x2 - w, b.y2 + LABEL_FONT], [b.x2 - w, b.y1 - 3],
+      [b.x2 + 3, (b.y1 + b.y2) / 2 + 3], [b.x1 - w - 3, (b.y1 + b.y2) / 2 + 3],
+    ])
+    b.showLabel = !!at
+    if (at) [b.lx, b.ly] = at
+  }
+  for (const r of rooms) {
+    if (!r.label) continue
+    const w = r.label.length * CHAR_W, h = r.size / 2
+    const at = tryPlace(r.label, [
+      [r.x + h + 3, r.y + 3], [r.x - h - 3 - w, r.y + 3],
+      [r.x - w / 2, r.y - h - 3], [r.x - w / 2, r.y + h + LABEL_FONT],
+      [r.x + h + 3, r.y - h - 2], [r.x + h + 3, r.y + h + LABEL_FONT - 1],
+    ])
+    if (at) [r.lx, r.ly] = at
+    else r.label = ''
+  }
+}
+
+/** does the segment cross the (non-square) rectangle? */
+function segHitsRect(seg: [number, number, number, number], r: Box): boolean {
+  const [x1, y1, x2, y2] = seg
+  const dx = x2 - x1, dy = y2 - y1
+  let t0 = 0, t1 = 1
+  const clip = (p: number, q: number) => {
+    if (p === 0) return q >= 0
+    const t = q / p
+    if (p < 0) { if (t > t1) return false; if (t > t0) t0 = t }
+    else { if (t < t0) return false; if (t < t1) t1 = t }
+    return true
+  }
+  return clip(-dx, x1 - r[0]) && clip(dx, r[2] - x1) && clip(-dy, y1 - r[1]) && clip(dy, r[3] - y1)
 }

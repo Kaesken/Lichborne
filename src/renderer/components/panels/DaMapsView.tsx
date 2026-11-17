@@ -313,7 +313,7 @@ export default function DaMapsView({ lichDb, imageIndex, currentRoom, character,
 
   const buildingShapes = useMemo(() => {
     if (!area) return null
-    return area.buildings.map((b, i) => (
+    return area.buildings.map((b, i) => b.outline && (
       <rect key={`b${i}`} x={b.x1} y={b.y1} width={b.x2 - b.x1} height={b.y2 - b.y1} rx={2}
         fill={showIndoor ? 'none' : 'var(--map-node-fill, #2a2a2a)'}
         fillOpacity={showIndoor ? 0 : 0.85}
@@ -358,14 +358,14 @@ export default function DaMapsView({ lichDb, imageIndex, currentRoom, character,
   const labels = useMemo(() => {
     if (!area) return null
     const roomLabels = area.rooms.filter(r => r.label && (showIndoor || !r.indoor)).map(r => (
-      <text key={`r${r.id}`} x={r.x + r.size / 2 + 3} y={r.y + 3} fontSize={9} fontStyle="italic"
+      <text key={`r${r.id}`} x={r.lx} y={r.ly} fontSize={9} fontStyle="italic"
         fill="var(--map-text-muted, #999)" pointerEvents="none"
         style={{ fontFamily: 'var(--font-mono, monospace)' }}>{r.label}</text>
     ))
     return [...roomLabels, ...area.buildings
-      .filter(b => b.name && (showIndoor || b.rooms.length >= 2))
+      .filter(b => b.name && b.showLabel)
       .map((b, i) => (
-        <text key={`l${i}`} x={b.x1} y={b.y2 + 9} fontSize={9} fontStyle="italic"
+        <text key={`l${i}`} x={b.lx} y={b.ly} fontSize={9} fontStyle="italic"
           fill="var(--map-text-muted, #999)" pointerEvents="none"
           style={{ fontFamily: 'var(--font-mono, monospace)' }}>{b.name}</text>
       ))]
