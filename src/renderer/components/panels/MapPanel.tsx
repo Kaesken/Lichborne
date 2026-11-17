@@ -19,7 +19,7 @@
 // resolver breadcrumb alive across a view switch — one ref per instance, never
 // module scope (pitfall #6). `memo`'d (B172): props are room primitives +
 // stable callbacks, so it renders on room change, not every GameWindow render.
-import { memo, useState, useRef, useEffect, useCallback } from 'react'
+import { memo, useState, useRef, useEffect, useCallback, Component, type ReactNode } from 'react'
 import type { LichRoom, GenieZone } from './mapTypes'
 import { findRoom, parseGenieZone, lichTitle, normalizeMatchKey } from './mapTypes'
 import { scheduleSharedProfileSave } from '../../profile'
@@ -173,6 +173,26 @@ function loadGenieCached(dir: string): Promise<Map<string, GenieZone> | null> {
 /** Publish a freshly XML-parsed zone set so sibling panels skip the cold path. */
 function primeGenieCache(dir: string, zones: Map<string, GenieZone>): void {
   if (zones.size > 0) genieCache = { key: dir, data: zones }
+}
+
+// Da'Maps is experimental: if it ever throws while rendering, show the error
+// inside the map panel instead of taking the whole window down with it.
+class DaMapsBoundary extends Component<{ children: ReactNode }, { error: string | null }> {
+  state = { error: null as string | null }
+  static getDerivedStateFromError(e: unknown) { return { error: String((e as Error)?.stack ?? e) } }
+  render() {
+    if (!this.state.error) return this.props.children
+    return (
+      <div className="map-canvas-wrap">
+        <div className="map-empty" style={{ pointerEvents: 'auto' }}>
+          <div className="map-empty-icon">⚠</div>
+          <div className="map-empty-msg">Da'Maps hit an error</div>
+          <pre className="map-empty-sub" style={{ whiteSpace: 'pre-wrap', textAlign: 'left', maxHeight: 200, overflow: 'auto', userSelect: 'text' }}>{this.state.error}</pre>
+          <button className="map-btn" onClick={() => this.setState({ error: null })}>Try again</button>
+        </div>
+      </div>
+    )
+  }
 }
 
 // B172: memoized — the map re-renders when the room actually changes (its
@@ -583,13 +603,15 @@ export default memo(function MapPanel({ roomTitle = '', roomDesc = '', roomExits
         />
       )}
       {dbStatus === 'ready' && viewMode === 'damaps' && (
-        <DaMapsView
-          lichDb={lichDb}
-          imageIndex={imageIndex}
-          currentRoom={currentRoom}
-          character={character}
-          onSendCommand={onSendCommand}
-        />
+        <DaMapsBoundary>
+          <DaMapsView
+            lichDb={lichDb}
+            imageIndex={imageIndex}
+            currentRoom={currentRoom}
+            character={character}
+            onSendCommand={onSendCommand}
+          />
+        </DaMapsBoundary>
       )}
       {viewMode === 'genie' && (dbStatus === 'ready' || dbStatus === 'error') && (
         <GenieMapView

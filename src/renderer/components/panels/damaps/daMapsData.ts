@@ -168,6 +168,7 @@ function splitTags(tags: string[] | undefined): { forage: string[]; hunting: str
   const forage: string[] = [], hunting: string[] = [], services: string[] = []
   let best: string | null = null
   for (const raw of tags ?? []) {
+    if (typeof raw !== 'string') continue   // the map DB has a few null tags
     const t = raw.trim()
     if (!t || t.startsWith('meta:')) continue
     const key = t.toLowerCase()
@@ -199,7 +200,9 @@ export function buildArea(image: string, rooms: LichRoom[], lichDb: Map<number, 
     const [x1, y1, x2, y2] = c
     const w = Math.abs(x2 - x1), h = Math.abs(y2 - y1)
     const { forage, hunting, services, category } = splitTags(r.tags)
-    const exits = Object.values(r.wayto ?? {})
+    // A few wayto values in the map DB are null (scripted moves Lich couldn't
+    // serialize); keep only real command strings.
+    const exits = Object.values(r.wayto ?? {}).filter((m): m is string => typeof m === 'string')
     const swim = exits.some(m => /^swim\b/i.test(m))
     const crossTo = new Set<string>()
     const crossNames: string[] = []
@@ -270,7 +273,7 @@ export function buildArea(image: string, rooms: LichRoom[], lichDb: Map<number, 
       if (seen.has(key)) continue
       seen.add(key)
       if (Math.hypot(a.x - b.x, a.y - b.y) > MAX_ARC) continue
-      arcs.push({ a: a.id, b: b.id, cat: classifyMove(move) })
+      arcs.push({ a: a.id, b: b.id, cat: classifyMove(typeof move === 'string' ? move : '') })
     }
   }
 
