@@ -259,10 +259,10 @@ export default function DaMapsView({ lichDb, imageIndex, currentRoom, character,
   const [pinnedId, setPinnedId] = useState<number | null>(null)
   const [showPanel, setShowPanel] = useState(true)
   const [tab, setTab] = useState<'legend' | 'room'>('room')
-  const [indoorMode, setIndoorMode] = useState<'auto' | 'all'>('auto')
   useEffect(() => { setHoverId(null); setHoverBuilding(null); setPinnedId(null); setHoverArea(null) }, [areaImage, mode])
 
-  const showIndoor = indoorMode === 'all' || transform.scale >= INDOOR_SCALE
+  // Every room is always drawn; indoor rooms sit inside a dotted building outline.
+  const showIndoor = true
 
   // Observations (mana / forage) — re-read when the capture records something.
   const [obs, setObs] = useState<DaObservations>(() => loadObservations())
@@ -590,10 +590,6 @@ export default function DaMapsView({ lichDb, imageIndex, currentRoom, character,
           }}>⊡</button>
         <button className={`map-btn${showPanel ? ' map-btn--active' : ''}`} onClick={() => setShowPanel(s => !s)}
           title={showPanel ? 'Hide the side panel' : 'Show the side panel (legend and room details)'}>▤</button>
-        <button className={`map-btn${indoorMode === 'all' ? ' map-btn--active' : ''}`}
-          disabled={mode === 'global'}
-          onClick={() => setIndoorMode(m => (m === 'all' ? 'auto' : 'all'))}
-          title={indoorMode === 'all' ? 'Indoor rooms: always shown (click for zoom-based)' : 'Indoor rooms: shown when zoomed in (click to always show)'}>⌂</button>
         <span style={{ flex: 1 }} />
       </div>
 
@@ -674,9 +670,9 @@ export default function DaMapsView({ lichDb, imageIndex, currentRoom, character,
                   <div style={sectionHead}>Other</div>
                   <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, marginBottom: 3 }}>
                     <svg width={14} height={14} style={{ flexShrink: 0, alignSelf: 'center' }}>
-                      <rect x={1} y={1} width={12} height={12} fill="var(--map-node-fill, #2a2a2a)" stroke="var(--map-node-stroke, #555)" />
+                      <rect x={1} y={1} width={12} height={12} rx={2} fill="none" stroke="var(--map-node-stroke, #555)" strokeDasharray="3 2" />
                     </svg>
-                    <span style={muted}>Building — zoom in (or ⌂) to see its rooms</span>
+                    <span style={muted}>Building (indoor rooms)</span>
                   </div>
                   <div style={{ ...muted, marginTop: 8 }}>Right-click any room to <code>;go2</code> there.</div>
                 </>
