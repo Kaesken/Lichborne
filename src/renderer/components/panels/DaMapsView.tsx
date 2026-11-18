@@ -25,8 +25,8 @@ import {
 interface Props {
   lichDb:        Map<number, LichRoom>
   currentRoom?:  LichRoom
-  /** damaps-mana.log in Lich's data folder (written by damaps-mana.lic) */
-  manaLogPath?:  string
+  /** where damaps-mana.log may be (written by damaps-mana.lic); the first that exists is read */
+  manaLogPaths?: string[]
   character:     string
   onSendCommand: (cmd: string) => void
 }
@@ -145,22 +145,25 @@ const muted: CSSProperties = { color: 'var(--map-text-muted, #888)' }
 
 /** Read damaps-mana.log now and every minute while Da'Maps is open. */
 const MANA_LOG_EVERY_MS = 60_000
-function useManaLog(path: string | undefined) {
+function useManaLog(paths: string[] | undefined) {
   const last = useRef<string | null>(null)
+  const key = paths?.join('|') ?? ''
   useEffect(() => {
-    if (!path) return
+    if (!key) return
     let live = true
-    const read = () => {
-      window.api.readFile(path).then(text => {
-        if (!live || text == null || text === last.current) return
-        last.current = text
-        importManaLog(text)
-      }, () => { /* no log yet */ })
+    const read = async () => {
+      for (const p of key.split('|')) {
+        const text = await window.api.readFile(p).catch(() => null)
+        if (!live) return
+        if (text == null) continue
+        if (text !== last.current) { last.current = text; importManaLog(text) }
+        return
+      }
     }
     read()
     const t = setInterval(read, MANA_LOG_EVERY_MS)
     return () => { live = false; clearInterval(t) }
-  }, [path])
+  }, [key])
 }
 
 /** "You are here", the same sonar ping as Lichborne's other maps: two rings
@@ -179,8 +182,8 @@ function HerePing({ x, y, size }: { x: number; y: number; size: number }) {
   )
 }
 
-export default function DaMapsView({ lichDb, currentRoom, manaLogPath, character, onSendCommand }: Props) {
-  useManaLog(manaLogPath)
+export default function DaMapsView({ lichDb, currentRoom, manaLogPaths, character, onSendCommand }: Props) {
+  useManaLog(manaLogPaths)
   // Da'Maps' own map, loaded once (a separate chunk).
   const [daWorld, setDaWorld] = useState<DaWorld | null>(null)
   const [worldError, setWorldError] = useState<string | null>(null)
