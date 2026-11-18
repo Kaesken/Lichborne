@@ -7,12 +7,11 @@
 //   - room categories / forage / hunting = Lich `tags`
 //   - indoor vs outdoor = "Obvious exits" (indoor) vs "Obvious paths" (outdoor)
 //
-// It also keeps a small local store of what players OBSERVE in a room: PERCEIVE
-// mana readings and successful forages, captured from the game text by
+// It also keeps a small local store of what players FIND when they forage in a
+// room, captured from the game text by
 // `daMapsObserveLine` / `daMapsObserveCommand` (called from GameWindow).
 
 import type { LichRoom } from '../mapTypes'
-import { scopedKey } from '../../../characterScope'
 
 /** The display name, kept in one place so it is easy to rename later. */
 export const DA_MAPS_NAME = "Da'Maps"
@@ -222,14 +221,17 @@ export function splitTags(tags: string[] | undefined): { forage: string[]; hunti
   return { forage, hunting: [...new Set(hunting)], services, category: best }
 }
 
-// ── Observations: mana + forage seen by players (local store) ─────────────────
+// ── Mana readings (built into Da'Maps) and forage (seen by players) ──────────
+//
+// Mana comes ONLY from the readings built into Da'Maps (damapsWorld.ts
+// loadManaSeed), made from damaps-mana.lic logs and checked before they go in.
+// Lichborne doesn't capture PERCEIVE itself: a player's reading depends on their
+// skill, so per-player capture would show uneven, unchecked numbers.
 
-/** `near`: reported by PERCEIVE in a neighbouring room, not taken in the room itself.
- *  `shared`: a reading built into Da'Maps (the mana tour), not your own. */
-export interface ManaReading { word: string; rank: number; text: string; at: number; near?: boolean; shared?: boolean }
+/** `near`: reported by PERCEIVE in a neighbouring room, not taken in the room itself. */
+export interface ManaReading { word: string; rank: number; text: string; at: number; near?: boolean }
 export interface ForageFind  { n: number; at: number }
 export interface DaObservations {
-  mana:   Record<string, Partial<Record<Realm, ManaReading>>>   // by Lich room id
   forage: Record<string, Record<string, ForageFind>>            // by Lich room id → item
 }
 
@@ -244,11 +246,12 @@ export function loadObservations(): DaObservations {
     const raw = localStorage.getItem(OBS_KEY)
     const parsed = raw ? JSON.parse(raw) : null
     obsCache = {
-      mana:   parsed?.mana   && typeof parsed.mana   === 'object' ? parsed.mana   : {},
       forage: parsed?.forage && typeof parsed.forage === 'object' ? parsed.forage : {},
     }
+    // Mana readings captured by earlier versions are dropped (see above).
+    if (parsed && 'mana' in parsed) localStorage.setItem(OBS_KEY, JSON.stringify(obsCache))
   } catch {
-    obsCache = { mana: {}, forage: {} }
+    obsCache = { forage: {} }
   }
   return obsCache!
 }
@@ -257,48 +260,6 @@ function saveObservations(o: DaObservations): void {
   obsCache = o
   try { localStorage.setItem(OBS_KEY, JSON.stringify(o)) } catch { /* quota — keep in memory */ }
   try { document.dispatchEvent(new CustomEvent(DA_OBS_EVENT)) } catch { /* no DOM */ }
-}
-
-export function recordMana(roomId: number, realm: Realm, word: string, text: string): void {
-  const o = loadObservations()
-  const rank = MANA_WORDS.indexOf(word.toLowerCase())
-  const room = { ...(o.mana[roomId] ?? {}) }
-  room[realm] = { word: word.toLowerCase(), rank, text, at: Date.now() }
-  saveObservations({ ...o, mana: { ...o.mana, [roomId]: room } })
-}
-
-/**
- * Merge the readings in a damaps-mana.log (written by the damaps-mana.lic Lich
- * script) into the observations. Tab-separated:
- *   time character lich_id direction realm word level out_of room_title raw_line
- * A room's own reading ("here") beats one a neighbour reported; otherwise the
- * newer reading wins. Lunar is ignored (it follows the moons, not the room).
- * Returns how many readings changed.
- */
-export function importManaLog(text: string): number {
-  const o = loadObservations()
-  const mana = { ...o.mana }
-  let changed = 0
-  for (const line of text.split(/\r?\n/)) {
-    const c = line.split('\t')
-    if (c.length < 8 || !/^\d+$/.test(c[2])) continue
-    const realm = c[4] as Realm
-    if (!ROOM_REALMS.includes(realm)) continue
-    const level = Number(c[6]), outOf = Number(c[7])
-    if (!(level >= 1 && outOf >= level)) continue
-    const rank = outOf === MANA_WORDS.length ? level - 1 : Math.max(0, Math.round((level / outOf) * MANA_WORDS.length) - 1)
-    const at = Date.parse(c[0].replace(' ', 'T')) || 0
-    const near = c[3] !== 'here'
-    const prev = mana[c[2]]?.[realm]
-    if (prev && ((near && !prev.near) || (near === !!prev.near && prev.at >= at))) continue
-    mana[c[2]] = { ...(mana[c[2]] ?? {}), [realm]: {
-      word: c[5], rank, at, near,
-      text: `${c[9] ?? ''}${c[1] ? ` (${c[1]})` : ''}`,
-    } }
-    changed++
-  }
-  if (changed) saveObservations({ ...o, mana })
-  return changed
 }
 
 export function recordForage(roomId: number, item: string): void {
@@ -314,15 +275,13 @@ export function recordForage(roomId: number, item: string): void {
 //
 // GameWindow calls `daMapsObserveCommand` for every command it sends and
 // `daMapsObserveLine` for every main-stream line. Both are cheap no-ops unless
-// the player recently sent PERCEIVE or FORAGE. The room the reading belongs to
-// is the one the map last resolved (`daMapsSetRoom`, fed by MapPanel).
+// the player recently sent FORAGE. The room the find belongs to is the one the
+// map last resolved (`daMapsSetRoom`, fed by MapPanel).
 //
-// NOTE: the exact game wording below is a first guess, built from the
-// Elanthipedia mana-word table. Verify against real PERCEIVE / FORAGE output
-// and adjust MANA_LINE_RE / FORAGE_FIND_RE if needed.
+// NOTE: the FORAGE wording below is a first guess; verify against real output
+// and adjust FORAGE_FIND_RE if needed.
 
 const currentRoomByChar = new Map<string, number>()
-const pendingPerceive   = new Map<string, number>()
 const pendingForage     = new Map<string, { at: number; item: string }>()
 const WINDOW_MS = 10_000
 
@@ -333,36 +292,15 @@ export function daMapsSetRoom(character: string, roomId: number | undefined): vo
 
 export function daMapsObserveCommand(character: string, cmd: string): void {
   const c = cmd.trim().toLowerCase()
-  if (/^perc(?:eive|eiv|ei|e)?(?:\s+mana)?$/.test(c)) pendingPerceive.set(character, Date.now())
   const f = /^forag(?:e|)\b\s*(.*)$/.exec(c)
   if (f) pendingForage.set(character, { at: Date.now(), item: f[1].trim() })
 }
 
-const MANA_WORD_RE  = new RegExp(`\\b(${MANA_WORDS.join('|')})\\b`, 'i')
-const REALM_RE      = /\b(life|holy|elemental|arcane|lunar)\b/i
 const FORAGE_FIND_RE = /\b(?:find|found|manage to find|come up with|gather)\s+(?:a|an|some|several)\s+([a-z][a-z' -]{1,40}?)(?=[.!,]|\s+(?:and|which|that|among|in|from)\b)/i
 const FORAGE_FAIL_RE = /\b(?:unable to find|fail to find|find nothing|don't find|do not find)\b/i
 
-function realmFromGuild(character: string): Realm | null {
-  try {
-    return guildRealm(localStorage.getItem(scopedKey(character, 'detectedGuild')))
-  } catch { return null }
-}
-
 export function daMapsObserveLine(character: string, line: string): void {
   const now = Date.now()
-
-  const p = pendingPerceive.get(character)
-  if (p !== undefined) {
-    if (now - p > WINDOW_MS) pendingPerceive.delete(character)
-    else if (/mana/i.test(line)) {
-      const room = currentRoomByChar.get(character)
-      const w = MANA_WORD_RE.exec(line)
-      const realm = (REALM_RE.exec(line)?.[1] as string | undefined)
-      const r = realm ? (realm[0].toUpperCase() + realm.slice(1).toLowerCase()) as Realm : realmFromGuild(character)
-      if (room !== undefined && w && r && r !== 'Lunar') recordMana(room, r, w[1], line.trim())
-    }
-  }
 
   const f = pendingForage.get(character)
   if (f !== undefined) {

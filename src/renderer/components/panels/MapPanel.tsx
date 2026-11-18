@@ -198,16 +198,6 @@ class DaMapsBoundary extends Component<{ children: ReactNode }, { error: string 
 // B172: memoized — the map re-renders when the room actually changes (its
 // props are room primitives + stable callbacks), not on every GameWindow
 // render (vitals ticks, main-text batches).
-/** damaps-mana.log sits in Lich's logs folder, beside its maps folder:
- *  <Lich>/logs/damaps-mana.log (the script's first version wrote to <Lich>/data,
- *  read only when logs has none: the script moves it over on its next run) */
-function manaLogPathsFrom(mapsDir: string): string[] | undefined {
-  const m = /^(.*)[\\/]maps[\\/]?$/.exec(mapsDir)
-  if (!m) return undefined
-  const sep = mapsDir.includes('\\') ? '\\' : '/'
-  return [`${m[1]}${sep}logs${sep}damaps-mana.log`, `${m[1]}${sep}data${sep}damaps-mana.log`]
-}
-
 export default memo(function MapPanel({ roomTitle = '', roomDesc = '', roomExits, roomId, lichMapVersion = 0, onSendCommand, large = false, mapAnimations = false, gameFamily }: Props) {
   const character = useCharacter()
   const saveProfile = useProfileSaver()
@@ -617,7 +607,6 @@ export default memo(function MapPanel({ roomTitle = '', roomDesc = '', roomExits
           <DaMapsView
             lichDb={lichDb}
             currentRoom={currentRoom}
-            manaLogPaths={manaLogPathsFrom(mapsDirRef.current)}
             character={character}
             onSendCommand={onSendCommand}
           />

@@ -143,9 +143,9 @@ export function hydrateArea(a: DaWorldArea, lichDb: Map<number, LichRoom>): DaAr
 //
 // public/damaps-mana-seed.json, built by tools/damaps/build-mana-seed.mjs from
 // damaps-mana.log files: one reading per room and realm, shipped so every
-// player sees mana without perceiving first. A room's mana doesn't change, and
-// these come from full-scale (21-step) readings, so they win over a player's
-// own; a player's readings only fill rooms these don't cover.
+// player sees mana without perceiving first. They are Da'Maps' only source of
+// mana: a room's mana doesn't change, and these are full-scale (21-step)
+// readings checked before they go in.
 
 export interface DaManaSeed {
   made: string
@@ -165,7 +165,7 @@ export function loadManaSeed(): Promise<DaManaSeed | null> {
         const out: Partial<Record<Realm, ManaReading>> = {}
         for (const [realm, [lv, near]] of Object.entries(realms)) {
           if (!(lv >= 1 && lv <= f.words.length)) continue
-          out[realm as Realm] = { word: f.words[lv - 1], rank: lv - 1, at, near: !!near, shared: true,
+          out[realm as Realm] = { word: f.words[lv - 1], rank: lv - 1, at, near: !!near,
             text: 'Read by the Da\'Maps mana tour' }
         }
         rooms[id] = out

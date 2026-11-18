@@ -18,15 +18,13 @@ import { lichTitle } from './mapTypes'
 import { scopedKey } from '../../characterScope'
 import {
   DA_MAPS_NAME, DA_ARC_COLOR, DA_CATEGORIES, DA_OBS_EVENT, ROOM_REALMS, MANA_WORDS,
-  LABEL_FONT, CHAR_W, guildRealm, loadObservations, importManaLog, PROVINCE_ORDER,
+  LABEL_FONT, CHAR_W, guildRealm, loadObservations, PROVINCE_ORDER,
   type DaArea, type DaRoom, type DaArcCategory, type Realm, type DaObservations,
 } from './damaps/daMapsData'
 
 interface Props {
   lichDb:        Map<number, LichRoom>
   currentRoom?:  LichRoom
-  /** where damaps-mana.log may be (written by damaps-mana.lic); the first that exists is read */
-  manaLogPaths?: string[]
   character:     string
   onSendCommand: (cmd: string) => void
 }
@@ -143,29 +141,6 @@ const sectionHead: CSSProperties = {
 }
 const muted: CSSProperties = { color: 'var(--map-text-muted, #888)' }
 
-/** Read damaps-mana.log now and every minute while Da'Maps is open. */
-const MANA_LOG_EVERY_MS = 60_000
-function useManaLog(paths: string[] | undefined) {
-  const last = useRef<string | null>(null)
-  const key = paths?.join('|') ?? ''
-  useEffect(() => {
-    if (!key) return
-    let live = true
-    const read = async () => {
-      for (const p of key.split('|')) {
-        const text = await window.api.readFile(p).catch(() => null)
-        if (!live) return
-        if (text == null) continue
-        if (text !== last.current) { last.current = text; importManaLog(text) }
-        return
-      }
-    }
-    read()
-    const t = setInterval(read, MANA_LOG_EVERY_MS)
-    return () => { live = false; clearInterval(t) }
-  }, [key])
-}
-
 /** "You are here", the same sonar ping as Lichborne's other maps: two rings
  *  expanding half a cycle apart (map-panel.css `.genie-here-ping`, stopped by
  *  epilepsy-safe mode) over a solid ring on the square. */
@@ -182,8 +157,7 @@ function HerePing({ x, y, size }: { x: number; y: number; size: number }) {
   )
 }
 
-export default function DaMapsView({ lichDb, currentRoom, manaLogPaths, character, onSendCommand }: Props) {
-  useManaLog(manaLogPaths)
+export default function DaMapsView({ lichDb, currentRoom, character, onSendCommand }: Props) {
   // Da'Maps' own map, loaded once (a separate chunk).
   const [daWorld, setDaWorld] = useState<DaWorld | null>(null)
   const [worldError, setWorldError] = useState<string | null>(null)
@@ -646,8 +620,7 @@ function DaMapsCanvas({ world: daWorld, lichDb, currentRoom, character, onSendCo
         </>
       )
     }
-    // the readings built into Da'Maps win; your own fill in rooms they don't cover
-    const mana = { ...(obs.mana[r.lich] ?? {}), ...(seed?.rooms[r.lich] ?? {}) }
+    const mana = seed?.rooms[r.lich] ?? {}
     const found = obs.forage[r.lich] ?? {}
     const foundItems = Object.entries(found).sort((a, b) => b[1].n - a[1].n)
     const lichForage = r.forage.filter(f => !found[f.toLowerCase()])
@@ -668,7 +641,7 @@ function DaMapsCanvas({ world: daWorld, lichDb, currentRoom, character, onSendCo
           const mine = realm === myRealm
           const pct = m && m.rank >= 0 ? ((m.rank + 1) / MANA_WORDS.length) * 100 : 0
           return (
-            <div key={realm} title={m ? `${m.text}\n(${m.shared ? `built into Da'Maps` : new Date(m.at).toLocaleString()}${m.near ? ', from a PERCEIVE in the next room' : ''})` : 'No PERCEIVE reading recorded here yet'}
+            <div key={realm} title={m ? `${m.text}${m.near ? '\n(from a PERCEIVE in the next room)' : ''}` : 'This room\'s mana hasn\'t been mapped yet'}
               style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 3,
                 color: mine ? 'var(--map-current-color, #e0a050)' : undefined }}>
               <span style={{ width: 72, flexShrink: 0, fontWeight: mine ? 'bold' : undefined }}>{mine ? '▸ ' : ''}{realm}</span>
@@ -676,7 +649,7 @@ function DaMapsCanvas({ world: daWorld, lichDb, currentRoom, character, onSendCo
                 <span style={{ display: 'block', height: 6, width: `${pct}%`,
                   background: mine ? 'var(--map-current-color, #e0a050)' : 'var(--map-text-muted, #777)' }} />
               </span>
-              <span style={{ minWidth: 70, textAlign: 'right', whiteSpace: 'nowrap', ...(m ? {} : muted) }}>{m ? m.word : 'no reading'}</span>
+              <span style={{ minWidth: 70, textAlign: 'right', whiteSpace: 'nowrap', ...(m ? {} : muted) }}>{m ? m.word : 'not mapped'}</span>
             </div>
           )
         })}

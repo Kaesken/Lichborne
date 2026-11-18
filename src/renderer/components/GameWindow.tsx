@@ -1161,7 +1161,7 @@ export default function GameWindow({
   const streamRoomRef = useRef<{ title: string | null; navId: number | null }>({ title: null, navId: null })
   const pendingFaceRef = useRef<{ id: string | null; at: number } | null>(null)
   const noteSentRef = useRef((cmd: string) => {
-    daMapsObserveCommand(profile, cmd)   // Da'Maps: PERCEIVE / FORAGE capture
+    daMapsObserveCommand(profile, cmd)   // Da'Maps: FORAGE capture
     const m = /^\s*face\s+(?:#(\d+)|\S.*)$/i.exec(cmd)
     if (m) pendingFaceRef.current = { id: m[1] ?? null, at: Date.now() }
   })
@@ -3478,7 +3478,7 @@ export default function GameWindow({
               // the TOP of this case — before the log push — via suppressSync.)
               if (!suppressSync) {
                 processLineRef.current('main', lineText)
-                daMapsObserveLine(profile, lineText)   // Da'Maps: PERCEIVE / FORAGE capture
+                daMapsObserveLine(profile, lineText)   // Da'Maps: FORAGE capture
                 processHighlightSoundsRef.current(lineText)
                 logHighlightFiresRef.current(lineText, 'main')
               }
