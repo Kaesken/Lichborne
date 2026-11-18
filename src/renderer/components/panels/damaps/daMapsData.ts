@@ -112,6 +112,7 @@ export interface DaRoom {
   lich:     number | null    // the Lich room behind this square (null = not matched)
   fill?:    string           // colour set by the map maker (the map file)
   stubTo?:  string           // area key this square stands in for (a ↗ marker to another map)
+  goTo?:    number           // for a ↗ marker: the Lich room on the other side (go2 target)
   x:        number           // centre, in the area tile's pixel space
   y:        number
   size:     number           // drawn square size

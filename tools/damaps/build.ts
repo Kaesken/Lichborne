@@ -77,7 +77,7 @@ for (const zone of merged.zones.values()) {
       name: a.name,
       province: areaProvince(zone.name, lichRoomsHere),
       floors,
-      rooms: a.rooms.map((r): DaWorldRoom => [r.id, r.lich ?? 0, r1(r.x), r1(r.y), r.fill ?? '', r.stubTo ?? '', r.title]),
+      rooms: a.rooms.map((r): DaWorldRoom => [r.id, r.lich ?? 0, r1(r.x), r1(r.y), r.fill ?? '', r.stubTo ?? '', r.title, r.goTo ?? 0]),
       lines: a.arcs.map(x => [x.a, x.b, x.cat === 'cardinal' ? 0 : x.cat === 'climb' ? 1 : 2]),
       texts: (a.texts ?? []).map(t => [t.text, t.x, t.y]),
       buildings: a.buildings.map(b => [b.name, r1(b.x1), r1(b.y1), r1(b.x2), r1(b.y2), b.rooms, b.outline ? 1 : 0]),

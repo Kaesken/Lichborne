@@ -24,8 +24,8 @@ export const DA_ROOM_SIZE = 8
 export const DA_WORLD_VERSION = 1
 const CATS: DaArcCategory[] = ['cardinal', 'climb', 'go']
 
-/** [id, lich id (0 = none), x, y, fill ('' = none), marker target area ('' = none), title] */
-export type DaWorldRoom = [number, number, number, number, string, string, string]
+/** [id, lich id (0 = none), x, y, fill ('' = none), marker target area ('' = none), title, marker's go2 Lich room (0 = none)] */
+export type DaWorldRoom = [number, number, number, number, string, string, string, number?]
 /** [from id, to id, 0 cardinal | 1 climb | 2 go] */
 export type DaWorldLine = [number, number, number]
 /** [name, x1, y1, x2, y2, room ids, 1 = draw its dotted outline] */
@@ -107,12 +107,12 @@ export function hydrateArea(a: DaWorldArea, lichDb: Map<number, LichRoom>): DaAr
   const rooms: DaRoom[] = []
   const byId = new Map<number, DaRoom>()
   const byLich = new Map<number, DaRoom>()
-  for (const [id, lid, x, y, fill, to, title] of a.rooms) {
+  for (const [id, lid, x, y, fill, to, title, goTo] of a.rooms) {
     const lr = lid ? lichDb.get(lid) : undefined
     const tags = splitTags(lr?.tags)
     const room: DaRoom = {
       id, lich: lid || null,
-      fill: fill || undefined, stubTo: to || undefined,
+      fill: fill || undefined, stubTo: to || undefined, goTo: (to && goTo) || undefined,
       x, y, size: DA_ROOM_SIZE, lx: 0, ly: 0,
       title: lr ? lichTitle(lr) : title,
       indoor: lr ? isIndoor(lr) : false,

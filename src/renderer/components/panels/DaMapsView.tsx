@@ -414,7 +414,7 @@ function DaMapsCanvas({ world: daWorld, lichDb, currentRoom, character, onSendCo
               setPinnedId(p => (p === r.id ? null : r.id))
               setTab('room'); setShowPanel(true)
             }}
-            onContextMenu={e => { e.preventDefault(); if (r.lich !== null) onSendCommand(`;go2 ${r.lich}`) }}
+            onContextMenu={e => { e.preventDefault(); const to = r.lich ?? r.goTo; if (to != null) onSendCommand(`;go2 ${to}`) }}
           />
           {r.stubTo && (
             <text x={r.x} y={r.y} fontSize={s + 2} fontWeight="bold" fill="var(--map-arc-special, #ffb74d)"
@@ -604,7 +604,10 @@ function DaMapsCanvas({ world: daWorld, lichDb, currentRoom, character, onSendCo
         <>
           {r.title && r.title !== to?.name && <div style={muted}>{r.title}</div>}
           <div style={{ fontWeight: 'bold' }}>{to?.name ?? 'Another map'}</div>
-          <div style={{ ...muted, marginTop: 6, fontStyle: 'italic' }}>Click to open that map</div>
+          {r.goTo != null && <div style={muted}>Lich #{r.goTo}</div>}
+          <div style={{ ...muted, marginTop: 6, fontStyle: 'italic' }}>
+            Click to open that map{r.goTo != null ? ' · Right-click: go2 there' : ''}
+          </div>
         </>
       )
     }

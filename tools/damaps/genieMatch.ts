@@ -29,6 +29,8 @@ export interface GenieMatch {
   lichOf: Map<string, number>
   /** Lich room id → every Genie node drawn for it (a room can sit on two maps) */
   nodesOf: Map<number, { zoneId: string; nodeId: number }[]>
+  /** a ↗ marker → the Lich room it stands for on the next map (for go2), by its name and description */
+  stubLichOf: Map<string, number>
   stats: { nodes: number; matched: number; stubs: number }
 }
 
@@ -95,12 +97,27 @@ export function matchGenieToLich(zones: Map<string, GenieZone>, lichDb: Map<numb
   }
 
   const lichOf = new Map<string, number>()
+  const stubLichOf = new Map<string, number>()
   const pending: { zone: GenieZone; node: GenieNode; cands: LichRoom[] }[] = []
   let total = 0, stubs = 0
 
   for (const zone of zones.values()) {
     for (const node of zone.nodes) {
-      if (isStub(node)) { stubs++; continue }
+      if (isStub(node)) {
+        stubs++
+        // A marker carries its room's name and description: match it the same
+        // way, but only as a go2 target (it isn't drawn as that room).
+        // Description exact, then its opening, then the name alone if it's unique.
+        const nd = new Set(node.descriptions.map(descKey))
+        const nh = new Set([...nd].map(head))
+        const named = byTitle.get(normalizeMatchKey(node.name)) ?? []
+        let c = named.filter(r => [...descOf(r)].some(d => nd.has(d)))
+        if (!c.length) c = named.filter(r => [...descOf(r)].some(d => nh.has(head(d))))
+        if (!c.length) c = named
+        if (c.length > 1) { const real = c.filter(hasGameId); if (real.length) c = real }
+        if (c.length === 1) stubLichOf.set(nodeKey(zone.id, node.id), c[0].id)
+        continue
+      }
       total++
       const nd = new Set(node.descriptions.map(descKey))
       const nh = new Set([...nd].map(head))
@@ -173,5 +190,5 @@ export function matchGenieToLich(zones: Map<string, GenieZone>, lichDb: Map<numb
     if (!nodesOf.has(lid)) nodesOf.set(lid, [])
     nodesOf.get(lid)!.push(entry)
   }
-  return { lichOf, nodesOf, stats: { nodes: total, matched: lichOf.size, stubs } }
+  return { lichOf, nodesOf, stubLichOf, stats: { nodes: total, matched: lichOf.size, stubs } }
 }

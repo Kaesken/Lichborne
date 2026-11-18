@@ -9,7 +9,7 @@
 // Area keys are `g:<zoneId>@<level>`; Genie maps can have several floors.
 
 import type { GenieZone, GenieNode, LichRoom } from '../../src/renderer/components/panels/mapTypes'
-import { lichTitle } from '../../src/renderer/components/panels/mapTypes'
+import { lichTitle, normalizeMatchKey } from '../../src/renderer/components/panels/mapTypes'
 import {
   type DaArea, type DaArc, type DaBuilding, type DaRoom,
   classifyMove, splitTags, isIndoor, buildingName, placeLabelsAndOutlines,
@@ -106,6 +106,31 @@ export function buildGenieArea(
     }
   }
 
+  // A ↗ marker from the map file stands for a room on the next map: find that
+  // Lich room, so right-click can go2 there. It's the room its door's Lich
+  // exits lead to by the same move, or else the one with the marker's name.
+  for (const r of rooms) {
+    if (!r.stubTo) continue
+    const stub = zone.nodes.find(n => n.id === r.id)!
+    const found = new Set<number>()
+    for (const d of zone.nodes) {
+      const toStub = d.arcs.find(a => a.destination === r.id)
+      const fromStub = stub.arcs.find(a => a.destination === d.id)
+      if (!toStub && !fromStub) continue
+      const door = match.lichOf.get(nodeKey(zone.id, d.id))
+      const way = door !== undefined ? lichDb.get(door)?.wayto ?? {} : {}
+      const byMove = toStub ? Object.entries(way).filter(([, mv]) => mv === toStub.move).map(([k]) => Number(k)) : []
+      const byName = Object.keys(way).map(Number).filter(k => {
+        const t = lichDb.get(k)
+        return t && normalizeMatchKey(lichTitle(t)) === normalizeMatchKey(stub.name)
+      })
+      const pick = byMove.length === 1 ? byMove : byName
+      if (pick.length === 1) found.add(pick[0])
+    }
+    const own = match.stubLichOf.get(nodeKey(zone.id, r.id))
+    r.goTo = own ?? (found.size === 1 ? [...found][0] : undefined)
+  }
+
   // ── No square left unattached ────────────────────────────────────────────
   // Some squares have no drawn line: the Genie map hides their exit (a long
   // `go portal`), the exit leads to another floor or map, or the map's makers
@@ -127,14 +152,14 @@ export function buildGenieArea(
   const nodeById = new Map(zone.nodes.map(n => [n.id, n]))
   let nextMarker = -1
   const near = (x: number, y: number) => rooms.some(o => Math.abs(o.x - x) < GENIE_ROOM_SIZE + 2 && Math.abs(o.y - y) < GENIE_ROOM_SIZE + 2)
-  const addMarker = (from: DaRoom, to: string, title: string) => {
+  const addMarker = (from: DaRoom, to: string, title: string, goTo?: number) => {
     if (!to) return false
     const step = GENIE_ROOM_SIZE * 2
     const spots: [number, number][] = [[step, 0], [0, -step], [-step, 0], [0, step], [step, -step], [-step, -step], [-step, step], [step, step]]
     const spot = spots.find(([dx, dy]) => !near(from.x + dx, from.y + dy))
     if (!spot) return false
     const m: DaRoom = {
-      id: nextMarker--, lich: null, stubTo: to,
+      id: nextMarker--, lich: null, stubTo: to, goTo,
       x: from.x + spot[0], y: from.y + spot[1], size: GENIE_ROOM_SIZE,
       lx: 0, ly: 0, title, indoor: false, category: null, forage: [], hunting: [], services: [],
       exits: [], crossTo: [to], label: '', building: null, location: '',
@@ -159,13 +184,13 @@ export function buildGenieArea(
     let done = false
     for (const a of n.arcs) {
       const d = a.destination ? nodeById.get(a.destination) : undefined
-      if (d && d.z !== level) { done = addMarker(r, genieAreaKey(zone.id, d.z), `${d.z > level ? 'Up' : 'Down'} to ${d.name}`); if (done) break }
+      if (d && d.z !== level) { done = addMarker(r, genieAreaKey(zone.id, d.z), `${d.z > level ? 'Up' : 'Down'} to ${d.name}`, match.lichOf.get(nodeKey(zone.id, d.id))); if (done) break }
     }
     if (!done) for (const o of out) {
       const key = areaOfLich(o.lich)
       if (key && key !== genieAreaKey(zone.id, level)) {
         const t = lichDb.get(o.lich)
-        done = addMarker(r, key, t ? lichTitle(t) : 'Another map')
+        done = addMarker(r, key, t ? lichTitle(t) : 'Another map', o.lich)
         if (done) break
       }
     }
