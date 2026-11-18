@@ -18,6 +18,7 @@ import { buildLayout, type DaLayout } from './damaps/daMapsLayout'
 import type { LichRoom, GenieZone } from './mapTypes'
 import { COLOR_LEGEND } from './mapTypes'
 import { matchGenieToLich, type GenieMatch } from './damaps/genieMatch'
+import { mergeSubMaps } from './damaps/genieMerge'
 import { buildGenieArea, genieAreaKey, genieLevels, parseGenieAreaKey, zoneIdByFile } from './damaps/genieArea'
 import { lichTitle } from './mapTypes'
 import { scopedKey } from '../../characterScope'
@@ -98,9 +99,14 @@ function lichSource(lichDb: Map<number, LichRoom>, imageIndex: Map<string, LichR
   }
 }
 
-function genieSource(zones: Map<string, GenieZone>, lichDb: Map<number, LichRoom>): MapSource {
+function genieSource(allZones: Map<string, GenieZone>, lichDb: Map<number, LichRoom>): MapSource {
+  // Building/side-area sub-maps (Jadewater Mansion, the Temple…) are folded
+  // into the town map they belong to, so a town is one connected map.
+  const merged = mergeSubMaps(allZones)
+  const zones = merged.zones
   const match: GenieMatch = matchGenieToLich(zones, lichDb)
-  const files = zoneIdByFile(zones)
+  const files = zoneIdByFile(allZones)
+  for (const [file, id] of files) { const p = merged.parentOf.get(id); if (p) files.set(file, p) }
   const cache = new Map<string, DaArea>()
   // Lich room → every area key it's drawn in (a room can sit on two maps).
   const keysOf = new Map<number, string[]>()
