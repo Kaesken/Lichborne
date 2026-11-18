@@ -18,7 +18,7 @@ import { lichTitle } from './mapTypes'
 import { scopedKey } from '../../characterScope'
 import {
   DA_MAPS_NAME, DA_ARC_COLOR, DA_CATEGORIES, DA_OBS_EVENT, ROOM_REALMS, MANA_WORDS,
-  buildArea, areaProvince, guildRealm, loadObservations, PROVINCE_ORDER,
+  buildArea, areaProvince, LABEL_FONT, CHAR_W, guildRealm, loadObservations, PROVINCE_ORDER,
   type DaArea, type DaRoom, type DaArcCategory, type Realm, type DaObservations,
 } from './damaps/daMapsData'
 
@@ -358,14 +358,16 @@ export default function DaMapsView({ lichDb, imageIndex, currentRoom, character,
   const labels = useMemo(() => {
     if (!area) return null
     const roomLabels = area.rooms.filter(r => r.label && (showIndoor || !r.indoor)).map(r => (
-      <text key={`r${r.id}`} x={r.lx} y={r.ly} fontSize={9} fontStyle="italic"
+      <text key={`r${r.id}`} x={r.lx} y={r.ly} fontSize={LABEL_FONT}
+        textLength={r.label.length * CHAR_W} lengthAdjust="spacingAndGlyphs" fontStyle="italic"
         fill="var(--map-text-muted, #999)" pointerEvents="none"
         style={{ fontFamily: 'var(--font-mono, monospace)' }}>{r.label}</text>
     ))
     return [...roomLabels, ...area.buildings
       .filter(b => b.name && b.showLabel)
       .map((b, i) => (
-        <text key={`l${i}`} x={b.lx} y={b.ly} fontSize={9} fontStyle="italic"
+        <text key={`l${i}`} x={b.lx} y={b.ly} fontSize={LABEL_FONT}
+          textLength={b.name.length * CHAR_W} lengthAdjust="spacingAndGlyphs" fontStyle="italic"
           fill="var(--map-text-muted, #999)" pointerEvents="none"
           style={{ fontFamily: 'var(--font-mono, monospace)' }}>{b.name}</text>
       ))]

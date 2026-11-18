@@ -13,7 +13,7 @@
 // mana readings and successful forages, captured from the game text by
 // `daMapsObserveLine` / `daMapsObserveCommand` (called from GameWindow).
 
-import { segHitsBox } from './daMapsLayout'
+import { segHitsBox, PITCH } from './daMapsLayout'
 import type { LichRoom } from '../mapTypes'
 import { lichTitle } from '../mapTypes'
 import { scopedKey } from '../../../characterScope'
@@ -25,6 +25,11 @@ export const DA_MAPS_NAME = "Da'Maps"
 
 export type DaArcCategory = 'cardinal' | 'climb' | 'go'
 
+const COMPASS: Record<string, [number, number]> = {
+  n: [0, -1], north: [0, -1], s: [0, 1], south: [0, 1], e: [1, 0], east: [1, 0], w: [-1, 0], west: [-1, 0],
+  ne: [1, -1], northeast: [1, -1], nw: [-1, -1], northwest: [-1, -1],
+  se: [1, 1], southeast: [1, 1], sw: [-1, 1], southwest: [-1, 1],
+}
 const CARDINALS = new Set([
   'n', 's', 'e', 'w', 'ne', 'nw', 'se', 'sw',
   'north', 'south', 'east', 'west', 'northeast', 'northwest', 'southeast', 'southwest',
@@ -380,7 +385,24 @@ export function buildArea(
   // Nothing may overlap: a line that would run through a room it doesn't
   // connect is left out (the exit still works for go2), then outlines and
   // labels are fitted around what's left.
-  const visibleArcs = dropArcsThroughRooms(arcs, placed, byId)
+  // A long line that isn't a straight compass exit (a door into a building
+  // set down a few cells away, a loop the Lich data draws out of true) would
+  // cut across the town, so only short ones are drawn.
+  const tidyArcs = layout ? arcs.filter(arc => {
+    const p = byId.get(arc.a)!, q = byId.get(arc.b)!
+    const len = Math.max(Math.abs(p.x - q.x), Math.abs(p.y - q.y)) / PITCH
+    if (len <= 4) return true
+    const move = lichDb.get(p.id)?.wayto?.[String(q.id)]
+    const back = lichDb.get(q.id)?.wayto?.[String(p.id)]
+    const straight = (m: unknown, from: DaRoom, to: DaRoom) => {
+      const d = typeof m === 'string' ? COMPASS[m.trim().toLowerCase()] : undefined
+      if (!d) return false
+      const dx = to.x - from.x, dy = to.y - from.y
+      return Math.abs(dx * d[1] - dy * d[0]) < 0.5 && dx * d[0] + dy * d[1] > 0
+    }
+    return straight(move, p, q) || straight(back, q, p)
+  }) : arcs
+  const visibleArcs = dropArcsThroughRooms(tidyArcs, placed, byId)
   placeLabelsAndOutlines(placed, buildings, visibleArcs, byId)
 
   const bbox = placed.length
@@ -514,8 +536,10 @@ export function daMapsObserveLine(character: string, line: string): void {
 
 // ── No-overlap pass: building outlines and labels ────────────────────────────
 
-const LABEL_FONT = 9
-const CHAR_W = LABEL_FONT * 0.6
+export const LABEL_FONT = 9
+/** labels are drawn exactly this wide per character (SVG textLength), so their
+ * boxes here match the screen at any zoom */
+export const CHAR_W = LABEL_FONT * 0.6
 type Box = [number, number, number, number]   // x1, y1, x2, y2
 
 function boxesHit(a: Box, b: Box, pad = 0): boolean {
@@ -618,8 +642,16 @@ function placeLabelsAndOutlines(rooms: DaRoom[], buildings: DaBuilding[], arcs: 
   }
 
   // Building names first (they name a whole group), then room landmarks.
+  const byIdLocal = new Map(rooms.map(r => [r.id, r]))
   for (const b of buildings) {
     if (!b.name) continue
+    if (!b.outline) {
+      // No outline to hang the name on: name one of its rooms instead, so the
+      // label sits right beside the rooms it describes.
+      const r = b.rooms.map(id => byIdLocal.get(id)!).find(m => !m.label)
+      if (r) r.label = b.name
+      continue
+    }
     const w = b.name.length * CHAR_W
     const at = tryPlace(b.name, [
       [b.x1, b.y2 + LABEL_FONT], [b.x1, b.y1 - 3],
