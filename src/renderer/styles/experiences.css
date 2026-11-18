@@ -3106,6 +3106,22 @@
   background: color-mix(in srgb, var(--text-primary) 14%, transparent);
 }
 .mx-cell--here .mx-none { width: 5.6em; height: 5.6em; background: none; border: 1px dashed color-mix(in srgb, var(--text-primary) 18%, transparent); }
+.mx-books {
+  flex: 1;
+  display: flex;
+  flex-wrap: wrap;
+  align-content: center;
+  justify-content: center;
+  gap: 0.6em 0.4em;
+  padding: 0.5em;
+  overflow-y: auto;
+}
+.mx-books .mx-dir { max-width: 6.5em; text-align: center; line-height: 1.15; }
+.mx-moons { display: flex; flex-wrap: wrap; justify-content: center; gap: 0.25em 1em; padding: 0.35em 0.75em 0.5em; font-size: 0.82em; color: var(--experience-scene-muted); border-top: 1px solid color-mix(in srgb, var(--text-primary) 10%, transparent); }
+.mx-moon b { font-weight: var(--ui-bold-weight, 600); }
+.mx-moon--up { color: var(--experience-scene-text); }
+.mx-moon--up b { color: var(--mana-lunar); }
+.mx-moons--none { font-style: italic; }
 .mx-other { padding: 0 0.75em 0.5em; font-size: 0.8em; color: var(--experience-scene-muted); display: flex; flex-wrap: wrap; gap: 0.3em 0.9em; }
 .mx-empty {
   flex: 1 1 auto;

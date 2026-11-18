@@ -13,8 +13,12 @@
 //   ... flaring mana below you, and fulgent mana above you.
 // plus the lower-skill forms ("your developing senses and see muted streams",
 // 3/5/9 steps, scaled to the 21 words) and "Faint streams of fiery mana ..."
-// where only the colour names the realm. Lunar is shown as Lunar: it follows
-// the moons, so the window says so rather than charting it.
+// where only the colour names the realm.
+//
+// Lunar (Moon Mage) mana is not per room: PERCEIVE MANA names a strength per
+// spellbook, which follows the moons (Moon Mage capture, 2026-11-18):
+//   You reach out with your senses and see glowing streams of cold, white Lunar mana available for the Perception book.
+// Those go into `books`, and a reading with books is kept when you move.
 
 import { MANA_WORDS, guildRealm, type Realm } from './components/panels/damaps/daMapsData'
 
@@ -27,10 +31,16 @@ export interface ManaNeighbour extends ManaStrength {
   /** north, northeast, ..., above, below (as the game said it) */
   dir: string
 }
+export interface ManaBook extends ManaStrength {
+  /** the spellbook as the game names it, e.g. "Moonlight Manipulation" */
+  book: string
+}
 export interface ManaView {
   realm: Realm | null
   here?: ManaStrength
   near: ManaNeighbour[]
+  /** Lunar: one strength per spellbook, in the order the game listed them */
+  books: ManaBook[]
   /** when the PERCEIVE reply arrived */
   at: number
 }
@@ -56,6 +66,7 @@ const STEP = String.raw`(?: \(\d+\/\d+\))?`
 const HERE_RE    = new RegExp(String.raw`your (?:(weak|developing|improving) )?senses and (?:see|hear) (\w+)${STEP} (?:streams|mana)`, 'i')
 const COLOUR_RE  = new RegExp(String.raw`^(\w+)${STEP} streams of (bluish-white|cold, white|fiery|golden|unholy black) mana`, 'i')
 const NEAR_RE    = new RegExp(String.raw`\b(\w+)${STEP} mana (?:to the (\w+)|(above|below) you)[,.]`, 'gi')
+const BOOK_RE    = new RegExp(String.raw`your (?:(weak|developing|improving) )?senses and (?:see|hear) (\w+)${STEP} streams of [^.]*?mana available for the (.+?) book`, 'i')
 const REALM_WORD = /streams of [^.]*?\b(Life|Holy|Elemental|Arcane|Lunar) mana/
 const COLOURS: Record<string, Realm> = {
   'bluish-white': 'Life', 'golden': 'Holy', 'fiery': 'Elemental', 'cold, white': 'Lunar', 'unholy black': 'Arcane',
@@ -80,6 +91,17 @@ export function manaStrength(word: string, tier?: string): ManaStrength | null {
  */
 export function readManaLine(view: ManaView, line: string, fallbackRealm: Realm | null): ManaView | null {
   if (!/mana/i.test(line)) return null
+  const b = BOOK_RE.exec(line)
+  if (b) {
+    const st = manaStrength(b[2], b[1])
+    if (!st) return null
+    const book = b[3].trim()
+    const books = [...view.books]
+    const i = books.findIndex(x => x.book === book)
+    if (i >= 0) books[i] = { book, ...st }
+    else books.push({ book, ...st })
+    return { ...view, realm: 'Lunar', books, at: Date.now() }
+  }
   const named = REALM_WORD.exec(line)?.[1] as Realm | undefined
   const colour = COLOUR_RE.exec(line)
   const realm = named ?? (colour ? COLOURS[colour[2].toLowerCase()] : undefined) ?? view.realm ?? fallbackRealm
@@ -98,7 +120,12 @@ export function readManaLine(view: ManaView, line: string, fallbackRealm: Realm 
   }
   if (here === view.here && near.length === view.near.length && realm === view.realm &&
       near.every((n, i) => n === view.near[i])) return null
-  return { realm, here, near, at: Date.now() }
+  return { realm, here, near, books: view.books, at: Date.now() }
+}
+
+/** a fresh, empty reading for GameWindow to arm */
+export function emptyManaView(): ManaView {
+  return { realm: null, near: [], books: [], at: Date.now() }
 }
 
 export function guildManaRealm(guild: string | null | undefined): Realm | null {

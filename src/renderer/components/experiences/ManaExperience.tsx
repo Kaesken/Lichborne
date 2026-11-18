@@ -14,9 +14,14 @@
 // hue is the realm's (fixed lore colours, --mana-* in themes.ts). A direction
 // PERCEIVE didn't mention keeps a faint dot, so the layout never shifts
 // (UX #2). The em chain is anchored to --game-font-size (pitfall #58a).
+//
+// Lunar is different (Kaesken): Moon Mage mana follows the moons, not the
+// room, so a Lunar reading shows one bubble per spellbook PERCEIVE MANA named,
+// with the moons from moonwatch (if it's running) beneath, and it stays when
+// you move.
 import { memo, type CSSProperties } from 'react'
 import type { ExperienceProps } from '../../experiences'
-import { optionShown, experienceById } from '../../experiences'
+import { optionShown, experienceById, moonRemainingMinutes, type MoonsState } from '../../experiences'
 import { MANA_WORDS, type Realm } from '../panels/damaps/daMapsData'
 import { guildManaRealm, type ManaStrength } from '../../manaPerceive'
 import '../../styles/experiences.css'
@@ -62,19 +67,62 @@ function Bubble({ s, realm, big, label }: {
   )
 }
 
-function ManaExperience({ mana, guild, hidden }: ExperienceProps) {
+const MOONS = [['katamba', 'Katamba'], ['yavash', 'Yavash'], ['xibar', 'Xibar']] as const
+
+function fmtMin(m: number): string {
+  const r = Math.max(1, Math.round(m))
+  return r < 60 ? `${r}m` : `${Math.floor(r / 60)}h ${r % 60}m`
+}
+
+/** which moons are up, from moonwatch; nothing when it isn't running */
+function MoonStrip({ moons }: { moons?: MoonsState }) {
+  if (!moons) return <div className="mx-moons mx-moons--none">Run moonwatch to see which moons are up.</div>
+  const now = Date.now()
+  const rows = MOONS.flatMap(([id, name]) => {
+    const m = moons[id]
+    if (!m) return []
+    const left = fmtMin(moonRemainingMinutes(m, moons.reportedAt, now))
+    return [<span key={id} className={`mx-moon${m.up ? ' mx-moon--up' : ''}`}>
+      <b>{name}</b> {m.up ? `up, sets in ${left}` : `down, rises in ${left}`}
+    </span>]
+  })
+  return rows.length > 0 ? <div className="mx-moons">{rows}</div> : null
+}
+
+function ManaExperience({ mana, moons, guild, hidden }: ExperienceProps) {
   const def = experienceById('mana')
   const shown = (id: string) => { const o = def?.options?.find(x => x.id === id); return o ? optionShown(hidden, o) : true }
   const myRealm = guildManaRealm(guild)
+
+  if (mana && mana.books.length > 0) {
+    return (
+      <div className="mx-scene">
+        {shown('header') && (
+          <div className="mx-header">
+            <span className="mx-realm" style={{ color: REALM_VAR.Lunar }}>Lunar</span>
+            <span className="mx-at">{new Date(mana.at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</span>
+          </div>
+        )}
+        <div className="mx-books">
+          {mana.books.map(b => (
+            <Bubble key={b.book} s={b} realm="Lunar" label={b.book} />
+          ))}
+        </div>
+        <MoonStrip moons={moons} />
+      </div>
+    )
+  }
 
   if (!mana || (!mana.here && mana.near.length === 0)) {
     return (
       <div className="mx-scene">
         <div className="mx-empty">
-          <div className="mx-empty-line">PERCEIVE to read this room&apos;s mana.</div>
+          <div className="mx-empty-line">
+            {myRealm === 'Lunar' ? 'PERCEIVE MANA to read the Lunar mana for each of your books.' : 'PERCEIVE to read this room\u2019s mana.'}
+          </div>
           <div className="mx-empty-hint">
             {myRealm === 'Lunar'
-              ? 'Lunar mana follows the moons, not the room.'
+              ? 'Lunar mana follows the moons, not the room, so the reading stays when you move.'
               : guild && !myRealm
                 ? 'Your guild doesn’t sense mana.'
                 : 'Your room shows in the centre, with the rooms around it that PERCEIVE mentions. It clears when you move.'}

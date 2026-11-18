@@ -86,7 +86,7 @@ import ExperienceLayer from './ExperienceLayer'
 import ExperienceShelf from './ExperienceShelf'
 import { SORT_MODES, type SortMode } from '../expParse'
 import { resolvePlace, type PlaceKey } from './experiences/tableauPlaces'
-import { isPerceiveCommand, isScriptPerceiveEcho, readManaLine, guildManaRealm, MANA_WINDOW_MS, type ManaView } from '../manaPerceive'
+import { isPerceiveCommand, isScriptPerceiveEcho, readManaLine, guildManaRealm, emptyManaView, MANA_WINDOW_MS, type ManaView } from '../manaPerceive'
 import { EXPERIENCES, experienceById, experienceAvailable, defaultHiddenMap, loadExperiences, saveExperiences, deriveSpellState, parseGroupLines, type GroupState, parseMoonLine, mergeMoonReport, parseTimeLine, SUN_RISE_RE, SUN_SET_RE, WEATHER_GLANCE_RE, type ExperienceInstance, type SceneCast, type SceneSpeechItem, type SceneMoveItem, type MoonsState, type WeatherInfo, type CalendarInfo, type SpellState, type SceneMoment, type SpellPulse, emptySpellPulse, recordSpellPulse, SPELL_ENDED_TTL_MS, type FaceTurn } from '../experiences'
 import { parseCombatPosition, parseCombatBalance, parseCombatRange, parseAssessLine, RANGE_ORDER, parseFaceReply, mayBeEngagementLine, parseEngagementLine, applyEngagement, stepOutRange, balanceFromAssessStatus, mayBeStrikeLine, parseStrikeLine, type CombatRange, type AssessEntity, type Engagement, type EngagementEvent, type StrikeEvent } from '../../shared/combatExtract'
 import { guildToFocusOption } from '../focusTemplates'
@@ -1172,7 +1172,7 @@ export default function GameWindow({
   const pendingFaceRef = useRef<{ id: string | null; at: number } | null>(null)
   const noteSentRef = useRef((cmd: string) => {
     daMapsObserveCommand(profile, cmd)   // Da'Maps: FORAGE capture
-    if (isPerceiveCommand(cmd)) manaArmRef.current = { at: Date.now(), view: { realm: null, near: [], at: Date.now() } }
+    if (isPerceiveCommand(cmd)) manaArmRef.current = { at: Date.now(), view: emptyManaView() }
     const m = /^\s*face\s+(?:#(\d+)|\S.*)$/i.exec(cmd)
     if (m) pendingFaceRef.current = { id: m[1] ?? null, at: Date.now() }
   })
@@ -3286,9 +3286,10 @@ export default function GameWindow({
       const batchWalk: [string, number][] = []
       const noteRoomChange = () => {
         batchRoomChanged = true
-        // the Mana window shows only this room's latest PERCEIVE
+        // the Mana window shows only this room's latest PERCEIVE; a Lunar
+        // (per-book) reading follows the moons, not the room, so it stays
         manaArmRef.current = null
-        setManaView(prev => (prev ? null : prev))
+        setManaView(prev => (prev && prev.books.length === 0 ? null : prev))
         batchEngage.length = 0
         batchEngageAt.length = 0
         batchWalk.length = 0
@@ -3495,7 +3496,7 @@ export default function GameWindow({
                 daMapsObserveLine(profile, lineText)   // Da'Maps: FORAGE capture
                 // Mana Experience: read a PERCEIVE reply (cheap no-op otherwise)
                 if (isScriptPerceiveEcho(lineText)) {
-                  manaArmRef.current = { at: Date.now(), view: { realm: null, near: [], at: Date.now() } }
+                  manaArmRef.current = { at: Date.now(), view: emptyManaView() }
                 } else if (manaArmRef.current) {
                   const arm = manaArmRef.current
                   if (Date.now() - arm.at > MANA_WINDOW_MS) manaArmRef.current = null

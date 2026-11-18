@@ -1616,7 +1616,7 @@ export const EXPERIENCES: ExperienceDef[] = [
     games: ['DR'],
     label: 'Mana',
     kind: 'instrument',
-    desc: 'The mana your last PERCEIVE reported: your room in the centre, with the rooms around it in their directions. Clears when you move.',
+    desc: 'The mana your last PERCEIVE reported: your room in the centre, with the rooms around it in their directions. Clears when you move. Moon Mages see each spellbook\'s Lunar mana and the moons instead.',
     component: ManaExperience,
     defaultRect: { x: 0.66, y: 0.08, w: 0.26, h: 0.42 },
     chrome: 'standard',
