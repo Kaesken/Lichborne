@@ -8,12 +8,12 @@
 //
 // Area keys are `g:<zoneId>@<level>`; Genie maps can have several floors.
 
-import type { GenieZone, GenieNode, LichRoom } from '../mapTypes'
-import { lichTitle } from '../mapTypes'
+import type { GenieZone, GenieNode, LichRoom } from '../../src/renderer/components/panels/mapTypes'
+import { lichTitle } from '../../src/renderer/components/panels/mapTypes'
 import {
   type DaArea, type DaArc, type DaBuilding, type DaRoom,
   classifyMove, splitTags, isIndoor, buildingName, placeLabelsAndOutlines,
-} from './daMapsData'
+} from '../../src/renderer/components/panels/damaps/daMapsData'
 import { isStub, nodeKey, type GenieMatch } from './genieMatch'
 
 export const GENIE_ROOM_SIZE = 8
@@ -196,6 +196,25 @@ export function buildGenieArea(
     // a marker is always beside its door, however sparse the map round it
     const far = !target && r.stubTo ? pick(rooms.filter(o => o.id !== r.id && !o.stubTo)) : undefined
     if (target ?? far) addArc(r.id, (target ?? far)!.id, 'go')
+  }
+
+  // No square on top of another. A few Genie squares share a spot (a marker
+  // drawn over its door, two ferry decks, a copy-pasted room); the later one,
+  // markers first, moves to the nearest free spot. Its lines follow it.
+  const S = GENIE_ROOM_SIZE
+  const clash = (r: DaRoom, x: number, y: number) =>
+    rooms.some(o => o !== r && Math.abs(o.x - x) < S + 2 && Math.abs(o.y - y) < S + 2)
+  const order = [...rooms].sort((p, q) => Number(!!q.stubTo) - Number(!!p.stubTo))
+  for (const r of order) {
+    if (!rooms.some(o => o !== r && Math.abs(o.x - r.x) < S && Math.abs(o.y - r.y) < S)) continue
+    search: for (let ring = 1; ring <= 30; ring++) {
+      for (let dx = -ring; dx <= ring; dx++) for (const dy of [-ring, ring]) {
+        for (const [px, py] of [[dx, dy], [dy, dx]]) {
+          const x = r.x + px * (S + 2), y = r.y + py * (S + 2)
+          if (!clash(r, x, y)) { r.x = x; r.y = y; break search }
+        }
+      }
+    }
   }
 
   // Buildings: indoor rooms joined on the map that share a name.

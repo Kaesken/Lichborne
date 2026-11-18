@@ -606,9 +606,7 @@ export default memo(function MapPanel({ roomTitle = '', roomDesc = '', roomExits
         <DaMapsBoundary>
           <DaMapsView
             lichDb={lichDb}
-            imageIndex={imageIndex}
             currentRoom={currentRoom}
-            genieZones={genieStatus === 'ready' ? genieZones : undefined}
             character={character}
             onSendCommand={onSendCommand}
           />

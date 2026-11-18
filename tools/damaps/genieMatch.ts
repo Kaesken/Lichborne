@@ -19,8 +19,8 @@
 //
 // Pure and React-free.
 
-import type { GenieZone, GenieNode, LichRoom } from '../mapTypes'
-import { lichTitle, normalizeMatchKey } from '../mapTypes'
+import type { GenieZone, GenieNode, LichRoom } from '../../src/renderer/components/panels/mapTypes'
+import { lichTitle, normalizeMatchKey } from '../../src/renderer/components/panels/mapTypes'
 
 export interface GenieMatch {
   /** `${zoneId}:${nodeId}` → Lich room id */

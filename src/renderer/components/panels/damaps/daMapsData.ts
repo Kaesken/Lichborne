@@ -1,11 +1,9 @@
 // Da'Maps — data layer.
 //
-// Da'Maps draws Lich's own map database (map-*.json) in the Genie-map style,
-// with NO Genie data at all:
-//   - room identity, travel and "you are here" = Lich room ids (+ `;go2`)
-//   - room positions = Lich's hand-placed `image_coords` on each area tile
-//     (the same coordinates the Lich Map view uses to put its marker on the
-//     PNG), so there is no auto-layout (the LichGraphView lesson, DESIGN §19.15)
+// Da'Maps draws its OWN map (damapsWorld.ts / public/damaps-world.json), made
+// once by tools/damaps/build-damaps.mjs. Each square on it carries a Lich room
+// id, so everything about a room comes from Lich's map database at run time:
+//   - identity, travel and "you are here" = Lich room ids (+ `;go2`)
 //   - room categories / forage / hunting = Lich `tags`
 //   - indoor vs outdoor = "Obvious exits" (indoor) vs "Obvious paths" (outdoor)
 //
@@ -13,9 +11,7 @@
 // mana readings and successful forages, captured from the game text by
 // `daMapsObserveLine` / `daMapsObserveCommand` (called from GameWindow).
 
-import { segHitsBox, PITCH } from './daMapsLayout'
 import type { LichRoom } from '../mapTypes'
-import { lichTitle } from '../mapTypes'
 import { scopedKey } from '../../../characterScope'
 
 /** The display name, kept in one place so it is easy to rename later. */
@@ -25,11 +21,6 @@ export const DA_MAPS_NAME = "Da'Maps"
 
 export type DaArcCategory = 'cardinal' | 'climb' | 'go'
 
-const COMPASS: Record<string, [number, number]> = {
-  n: [0, -1], north: [0, -1], s: [0, 1], south: [0, 1], e: [1, 0], east: [1, 0], w: [-1, 0], west: [-1, 0],
-  ne: [1, -1], northeast: [1, -1], nw: [-1, -1], northwest: [-1, -1],
-  se: [1, 1], southeast: [1, 1], sw: [-1, 1], southwest: [-1, 1],
-}
 const CARDINALS = new Set([
   'n', 's', 'e', 'w', 'ne', 'nw', 'se', 'sw',
   'north', 'south', 'east', 'west', 'northeast', 'northwest', 'southeast', 'southwest',
@@ -230,267 +221,6 @@ export function splitTags(tags: string[] | undefined): { forage: string[]; hunti
   return { forage, hunting: [...new Set(hunting)], services, category: best }
 }
 
-/**
- * Build one area (one Lich tile) for drawing. Pure; cache the result per
- * (database, image). `lichDb` resolves exits that leave the area.
- */
-export function buildArea(
-  image: string, rooms: LichRoom[], lichDb: Map<number, LichRoom>,
-  layout?: { pos: Map<number, [number, number]>; size: Map<number, number>; areaOf: Map<number, string> },
-): DaArea {
-  const placed: DaRoom[] = []
-  const byId = new Map<number, DaRoom>()
-
-  for (const r of rooms) {
-    let cx: number, cy: number, size: number
-    const lp = layout?.pos.get(r.id)
-    if (layout) {
-      if (!lp) continue
-      ;[cx, cy] = lp
-      size = layout.size.get(r.id) ?? 11
-    } else {
-      const c = r.image_coords
-      if (!c || c.length < 4) continue
-      const [x1, y1, x2, y2] = c
-      const w = Math.abs(x2 - x1), h = Math.abs(y2 - y1)
-      cx = (x1 + x2) / 2; cy = (y1 + y2) / 2
-      // Lich tiles draw ~16px rooms; 70% of that leaves the Genie-style gaps.
-      size = Math.max(6, Math.min(24, Math.min(w || 12, h || 12) * 0.7))
-    }
-    const { forage, hunting, services, category } = splitTags(r.tags)
-    // A few wayto values in the map DB are null (scripted moves Lich couldn't
-    // serialize); keep only real command strings.
-    const exits = Object.values(r.wayto ?? {}).filter((m): m is string => typeof m === 'string')
-    const swim = exits.some(m => /^swim\b/i.test(m))
-    const crossTo = new Set<string>()
-    const crossNames: string[] = []
-    for (const k of Object.keys(r.wayto ?? {})) {
-      const t = lichDb.get(Number(k))
-      const tArea = t ? (layout ? layout.areaOf.get(t.id) : (t.image_coords ? t.image : undefined)) : undefined
-      if (t && tArea && tArea !== image) {
-        crossTo.add(tArea)
-        crossNames.push(buildingName(lichTitle(t)))
-      }
-    }
-    const room: DaRoom = {
-      id: r.id, lich: r.id,
-      x: cx, y: cy, size,
-      lx: 0, ly: 0,
-      title: lichTitle(r),
-      indoor: isIndoor(r),
-      category: category ?? (swim ? 'water' : null),
-      forage, hunting, services,
-      exits,
-      crossTo: [...crossTo],
-      label: crossNames[0] ?? '',
-      building: null,
-      location: r.location ?? '',
-    }
-    placed.push(room)
-    byId.set(room.id, room)
-  }
-
-  // Labels: a room that leads into another area is named after where it leads
-  // ("Emmiline's Cottage", "Empath Guild") — the same kind of landmark text the
-  // Genie maps draw. A room in a named building/shop gets that name. Names that
-  // are just this area's street prefix ("The Crossing") are dropped, and so are
-  // repeats of the same name close together.
-  const prefixCount = new Map<string, number>()
-  for (const room of placed) {
-    const n = buildingName(room.title)
-    prefixCount.set(n, (prefixCount.get(n) ?? 0) + 1)
-  }
-  const streetPrefix = [...prefixCount.entries()].sort((p, q) => q[1] - p[1])[0]?.[0] ?? ''
-  const kept: DaRoom[] = []
-  for (const room of placed) {
-    let name = room.label
-    if (!name && room.category && !room.indoor) name = buildingName(room.title)
-    if (!name || name === streetPrefix || name === buildingName(room.title) && room.crossTo.length === 0 && !room.category) {
-      room.label = ''
-      continue
-    }
-    const near = kept.some(k => k.label === name && Math.hypot(k.x - room.x, k.y - room.y) < (layout ? 200 : 80))
-    room.label = near ? '' : name
-    if (room.label) kept.push(room)
-  }
-
-  // Arcs inside the area, de-duplicated. Very long lines are skipped (portal /
-  // "go" exits whose far end sits across the tile) — they're walkable but would
-  // just draw a line across the map, the same reason Genie hides such arcs.
-  const MAX_ARC = layout ? 650 : 260
-  const seen = new Set<string>()
-  const arcs: DaArc[] = []
-  const longArcs: DaArc[] = []   // too long to draw normally; kept for rooms with no other line
-  for (const r of rooms) {
-    const a = byId.get(r.id)
-    if (!a) continue
-    for (const [k, move] of Object.entries(r.wayto ?? {})) {
-      const b = byId.get(Number(k))
-      if (!b || b.id === a.id) continue
-      const key = a.id < b.id ? `${a.id}-${b.id}` : `${b.id}-${a.id}`
-      if (seen.has(key)) continue
-      seen.add(key)
-      if (Math.hypot(a.x - b.x, a.y - b.y) > MAX_ARC) { longArcs.push({ a: a.id, b: b.id, cat: classifyMove(typeof move === 'string' ? move : '') }); continue }
-      arcs.push({ a: a.id, b: b.id, cat: classifyMove(typeof move === 'string' ? move : '') })
-    }
-  }
-
-  // Buildings: connected indoor rooms that share a name ("Half Pint, Bar" +
-  // "Half Pint, Kitchen"), drawn as a dotted outline. Requiring the same name
-  // stops one long chain of indoor rooms (sewers, guild tunnels) from being
-  // boxed together across half the town.
-  const parent = new Map<number, number>()
-  const find = (x: number): number => {
-    let p = parent.get(x) ?? x
-    while (p !== (parent.get(p) ?? p)) p = parent.get(p) ?? p
-    parent.set(x, p)
-    return p
-  }
-  for (const room of placed) if (room.indoor) parent.set(room.id, room.id)
-  for (const r of rooms) {
-    if (!parent.has(r.id)) continue
-    const nm = buildingName(lichTitle(r))
-    for (const k of Object.keys(r.wayto ?? {})) {
-      const t = Number(k)
-      if (!parent.has(t)) continue
-      const tr = lichDb.get(t)
-      if (!tr || buildingName(lichTitle(tr)) !== nm) continue
-      const ra = find(r.id), rb = find(t)
-      if (ra !== rb) parent.set(ra, rb)
-    }
-  }
-  const groups = new Map<number, DaRoom[]>()
-  for (const room of placed) {
-    if (!room.indoor) continue
-    const g = find(room.id)
-    if (!groups.has(g)) groups.set(g, [])
-    groups.get(g)!.push(room)
-  }
-  const buildings: DaBuilding[] = []
-  for (const members of groups.values()) {
-    const names = new Map<string, number>()
-    for (const m of members) {
-      const n = buildingName(m.title)
-      names.set(n, (names.get(n) ?? 0) + 1)
-    }
-    const name = [...names.entries()].sort((p, q) => q[1] - p[1])[0]?.[0] ?? ''
-    const pad = 4
-    const b: DaBuilding = {
-      name, outline: true, lx: 0, ly: 0, showLabel: false,
-      rooms: members.map(m => m.id),
-      x1: Math.min(...members.map(m => m.x - m.size / 2)) - pad,
-      y1: Math.min(...members.map(m => m.y - m.size / 2)) - pad,
-      x2: Math.max(...members.map(m => m.x + m.size / 2)) + pad,
-      y2: Math.max(...members.map(m => m.y + m.size / 2)) + pad,
-    }
-    // One-room shops are just a square (like Genie); an outline that would
-    // span a big part of the map means the rooms aren't really one building.
-    if (members.length < 2) continue
-    const idx = buildings.push(b) - 1
-    for (const m of members) m.building = idx
-  }
-
-  // Nothing may overlap: a line that would run through a room it doesn't
-  // connect is left out (the exit still works for go2), then outlines and
-  // labels are fitted around what's left.
-  // A long line that isn't a straight compass exit (a door into a building
-  // set down a few cells away, a loop the Lich data draws out of true) would
-  // cut across the town, so only short ones are drawn.
-  const tidyArcs = layout ? arcs.filter(arc => {
-    const p = byId.get(arc.a)!, q = byId.get(arc.b)!
-    const len = Math.max(Math.abs(p.x - q.x), Math.abs(p.y - q.y)) / PITCH
-    if (len <= 4) return true
-    const move = lichDb.get(p.id)?.wayto?.[String(q.id)]
-    const back = lichDb.get(q.id)?.wayto?.[String(p.id)]
-    const straight = (m: unknown, from: DaRoom, to: DaRoom) => {
-      const d = typeof m === 'string' ? COMPASS[m.trim().toLowerCase()] : undefined
-      if (!d) return false
-      const dx = to.x - from.x, dy = to.y - from.y
-      return Math.abs(dx * d[1] - dy * d[0]) < 0.5 && dx * d[0] + dy * d[1] > 0
-    }
-    return straight(move, p, q) || straight(back, q, p)
-  }) : arcs
-  const visibleArcs = dropArcsThroughRooms(tidyArcs, placed, byId)
-
-  // Every room keeps a line. A room whose lines were all left out above gets
-  // its shortest one back; a room whose exits all leave this area gets a
-  // small ↗ marker beside it, joined by a short line (click it to go there).
-  const degree = new Map<number, number>()
-  const bump = (id: number) => degree.set(id, (degree.get(id) ?? 0) + 1)
-  for (const a of visibleArcs) { bump(a.a); bump(a.b) }
-  let nextMarker = -1
-  for (const room of [...placed]) {
-    if (degree.get(room.id)) continue
-    let own = arcs.concat(longArcs).filter(a => a.a === room.id || a.b === room.id)
-    if (!own.length) {
-      // exits that only lead IN to this room (it lists none of its own)
-      for (const from of incomingOf(lichDb).get(room.id) ?? []) {
-        if (byId.has(from) && from !== room.id) own.push({ a: from, b: room.id, cat: classifyMove(String(lichDb.get(from)?.wayto?.[String(room.id)] ?? '')) })
-      }
-    }
-    if (own.length) {
-      const len = (a: DaArc) => { const p = byId.get(a.a)!, q = byId.get(a.b)!; return Math.hypot(p.x - q.x, p.y - q.y) }
-      const best = own.sort((a, b) => len(a) - len(b))[0]
-      visibleArcs.push(best); bump(best.a); bump(best.b)
-      continue
-    }
-    let to = room.crossTo[0]
-    if (!to && layout) for (const from of incomingOf(lichDb).get(room.id) ?? []) {
-      const k = layout.areaOf.get(from)
-      if (k && k !== image) { to = k; break }
-    }
-    if (!to) {
-      // Lich knows no exit into or out of this room at all: join it to the
-      // nearest room of the same building, else the nearest room.
-      const others = placed.filter(o => o.id !== room.id && !o.stubTo)
-      const d = (o: DaRoom) => Math.hypot(o.x - room.x, o.y - room.y)
-      const same = others.filter(o => buildingName(o.title) === buildingName(room.title)).sort((x, y) => d(x) - d(y))[0]
-      const any = others.sort((x, y) => d(x) - d(y))[0]
-      const t = same && d(same) <= (any ? d(any) * 4 : Infinity) ? same : any
-      if (t) { visibleArcs.push({ a: room.id, b: t.id, cat: 'go' }); bump(room.id); bump(t.id) }
-      continue
-    }
-    const step = room.size * 1.8
-    const free = (x: number, y: number) => !placed.some(o => Math.abs(o.x - x) < o.size && Math.abs(o.y - y) < o.size)
-    const spot = ([[step, 0], [0, -step], [-step, 0], [0, step], [step, -step], [-step, -step], [-step, step], [step, step]] as [number, number][])
-      .find(([dx, dy]) => free(room.x + dx, room.y + dy)) ?? [step, 0]
-    const m: DaRoom = {
-      id: nextMarker--, lich: null, stubTo: to,
-      x: room.x + spot[0], y: room.y + spot[1], size: room.size,
-      lx: 0, ly: 0, title: areaDisplayName(to), indoor: false, category: null,
-      forage: [], hunting: [], services: [], exits: [], crossTo: [to], label: '', building: null, location: '',
-    }
-    placed.push(m); byId.set(m.id, m)
-    visibleArcs.push({ a: room.id, b: m.id, cat: 'go' }); bump(room.id); bump(m.id)
-  }
-  placeLabelsAndOutlines(placed, buildings, visibleArcs, byId)
-
-  const bbox = placed.length
-    ? {
-        x1: Math.min(...placed.map(r => r.x)), y1: Math.min(...placed.map(r => r.y)),
-        x2: Math.max(...placed.map(r => r.x)), y2: Math.max(...placed.map(r => r.y)),
-      }
-    : { x1: 0, y1: 0, x2: 100, y2: 100 }
-
-  return { image, name: areaDisplayName(image), rooms: placed, byId, byLich: byId, arcs: visibleArcs, buildings, bbox }
-}
-
-/** room id → rooms whose exits lead to it (built once per map database) */
-const incomingCache = new WeakMap<Map<number, LichRoom>, Map<number, number[]>>()
-function incomingOf(lichDb: Map<number, LichRoom>): Map<number, number[]> {
-  let m = incomingCache.get(lichDb)
-  if (!m) {
-    m = new Map()
-    for (const r of lichDb.values()) for (const k of Object.keys(r.wayto ?? {})) {
-      const t = Number(k)
-      if (!m.has(t)) m.set(t, [])
-      m.get(t)!.push(r.id)
-    }
-    incomingCache.set(lichDb, m)
-  }
-  return m
-}
-
 // ── Observations: mana + forage seen by players (local store) ─────────────────
 
 export interface ManaReading { word: string; rank: number; text: string; at: number }
@@ -651,25 +381,6 @@ class BoxGrid {
  * in the first spot around its room/building that's clear of every room
  * square and every other label, or isn't drawn.
  */
-function dropArcsThroughRooms(arcs: DaArc[], rooms: DaRoom[], byId: Map<number, DaRoom>): DaArc[] {
-  const grid = new BoxGrid()
-  const boxes = new Map<Box, DaRoom>()
-  for (const r of rooms) {
-    const b: Box = [r.x - r.size / 2, r.y - r.size / 2, r.x + r.size / 2, r.y + r.size / 2]
-    grid.add(b); boxes.set(b, r)
-  }
-  return arcs.filter(arc => {
-    const p = byId.get(arc.a)!, q = byId.get(arc.b)!
-    const seg: [number, number, number, number] = [p.x, p.y, q.x, q.y]
-    for (const b of grid.within([Math.min(p.x, q.x), Math.min(p.y, q.y), Math.max(p.x, q.x), Math.max(p.y, q.y)])) {
-      const r = boxes.get(b)!
-      if (r.id === p.id || r.id === q.id) continue
-      if (segHitsBox(seg, r.x, r.y, r.size / 2)) return false
-    }
-    return true
-  })
-}
-
 export function placeLabelsAndOutlines(rooms: DaRoom[], buildings: DaBuilding[], arcs: DaArc[], byId: Map<number, DaRoom>, opts: { labels: boolean } = { labels: true }) {
   const roomGrid = new BoxGrid()
   const roomBox = (r: DaRoom): Box => [r.x - r.size / 2, r.y - r.size / 2, r.x + r.size / 2, r.y + r.size / 2]
