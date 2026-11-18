@@ -608,6 +608,7 @@ export default memo(function MapPanel({ roomTitle = '', roomDesc = '', roomExits
             lichDb={lichDb}
             imageIndex={imageIndex}
             currentRoom={currentRoom}
+            genieZones={genieStatus === 'ready' ? genieZones : undefined}
             character={character}
             onSendCommand={onSendCommand}
           />

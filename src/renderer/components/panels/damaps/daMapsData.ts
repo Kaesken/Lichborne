@@ -117,7 +117,10 @@ export function guildRealm(guild: string | null | undefined): Realm | null {
 // ── Area model ────────────────────────────────────────────────────────────────
 
 export interface DaRoom {
-  id:       number
+  id:       number           // unique within the area (the Lich id when it has one)
+  lich:     number | null    // the Lich room behind this square (null = not matched)
+  fill?:    string           // colour set by the map maker (Genie maps)
+  stubTo?:  string           // area key this square stands in for (Genie boundary marker)
   x:        number           // centre, in the area tile's pixel space
   y:        number
   size:     number           // drawn square size
@@ -154,6 +157,10 @@ export interface DaArea {
   arcs:      DaArc[]
   buildings: DaBuilding[]
   bbox:      { x1: number; y1: number; x2: number; y2: number }
+  /** the square for a Lich room id */
+  byLich:    Map<number, DaRoom>
+  /** free-standing place names drawn by the map maker (Genie maps) */
+  texts?:    { text: string; x: number; y: number }[]
 }
 
 /** "zoluren-1-crossing-1377284934.png" → "Zoluren 1 Crossing". */
@@ -191,17 +198,17 @@ export function areaProvince(image: string, rooms: LichRoom[]): string {
   return 'Other'
 }
 
-function buildingName(title: string): string {
+export function buildingName(title: string): string {
   const i = title.indexOf(',')
   return (i > 0 ? title.slice(0, i) : title).trim()
 }
 
-function isIndoor(r: LichRoom): boolean {
+export function isIndoor(r: LichRoom): boolean {
   const p = (r.paths ?? [])[0] ?? ''
   return /^Obvious exits/i.test(p)
 }
 
-function splitTags(tags: string[] | undefined): { forage: string[]; hunting: string[]; services: string[]; category: string | null } {
+export function splitTags(tags: string[] | undefined): { forage: string[]; hunting: string[]; services: string[]; category: string | null } {
   const forage: string[] = [], hunting: string[] = [], services: string[] = []
   let best: string | null = null
   for (const raw of tags ?? []) {
@@ -266,7 +273,7 @@ export function buildArea(
       }
     }
     const room: DaRoom = {
-      id: r.id,
+      id: r.id, lich: r.id,
       x: cx, y: cy, size,
       lx: 0, ly: 0,
       title: lichTitle(r),
@@ -412,7 +419,7 @@ export function buildArea(
       }
     : { x1: 0, y1: 0, x2: 100, y2: 100 }
 
-  return { image, name: areaDisplayName(image), rooms: placed, byId, arcs: visibleArcs, buildings, bbox }
+  return { image, name: areaDisplayName(image), rooms: placed, byId, byLich: byId, arcs: visibleArcs, buildings, bbox }
 }
 
 // ── Observations: mana + forage seen by players (local store) ─────────────────
@@ -594,7 +601,7 @@ function dropArcsThroughRooms(arcs: DaArc[], rooms: DaRoom[], byId: Map<number, 
   })
 }
 
-function placeLabelsAndOutlines(rooms: DaRoom[], buildings: DaBuilding[], arcs: DaArc[], byId: Map<number, DaRoom>) {
+export function placeLabelsAndOutlines(rooms: DaRoom[], buildings: DaBuilding[], arcs: DaArc[], byId: Map<number, DaRoom>, opts: { labels: boolean } = { labels: true }) {
   const roomGrid = new BoxGrid()
   const roomBox = (r: DaRoom): Box => [r.x - r.size / 2, r.y - r.size / 2, r.x + r.size / 2, r.y + r.size / 2]
   for (const r of rooms) roomGrid.add(roomBox(r))
@@ -641,6 +648,7 @@ function placeLabelsAndOutlines(rooms: DaRoom[], buildings: DaBuilding[], arcs: 
     return null
   }
 
+  if (!opts.labels) return
   // Building names first (they name a whole group), then room landmarks.
   const byIdLocal = new Map(rooms.map(r => [r.id, r]))
   for (const b of buildings) {

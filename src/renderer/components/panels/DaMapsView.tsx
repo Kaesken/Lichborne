@@ -1,19 +1,24 @@
 // Da'Maps view — the third map mode behind MapPanel ("Lich Map" / "Genie Maps"
-// / "Da'Maps"). Draws Lich's own map database in the Genie-map look, with NO
-// Genie data: positions come from each Lich room's hand-placed `image_coords`,
-// identity + travel come from Lich room ids and `;go2`. See damaps/daMapsData.ts
-// for the data model and the PERCEIVE / FORAGE capture.
+// / "Da'Maps"). Two sources for WHERE rooms are drawn:
+//   - the player's Genie maps (when Lichborne has their folder): the hand-laid
+//     community layout, each square matched to a Lich room (damaps/genieMatch.ts,
+//     damaps/genieArea.ts);
+//   - otherwise Lich's own map tiles, laid out on a grid (damaps/daMapsLayout.ts).
+// Identity and travel are always Lich: room ids and `;go2`. See
+// damaps/daMapsData.ts for the data model and the PERCEIVE / FORAGE capture.
 //
 // Interaction model:
 //   - hover a room        → the side panel's "Room" tab shows it
-//   - left-click a room   → pin it in the "Room" tab (click again to unpin)
+//   - left-click a room   → pin it in the "Room" tab (click again to unpin);
+//                           a boundary marker opens the map it leads to
 //   - right-click a room  → `;go2 <lich id>`
 //   - drag to pan, wheel to zoom
-//   - zoomed out, each building (a connected group of indoor rooms) is drawn
-//     as one outline; zoom in and its rooms appear ("semantic zoom")
 import { useState, useRef, useEffect, useMemo, useCallback, type CSSProperties } from 'react'
 import { buildLayout, type DaLayout } from './damaps/daMapsLayout'
-import type { LichRoom } from './mapTypes'
+import type { LichRoom, GenieZone } from './mapTypes'
+import { COLOR_LEGEND } from './mapTypes'
+import { matchGenieToLich, type GenieMatch } from './damaps/genieMatch'
+import { buildGenieArea, genieAreaKey, genieLevels, parseGenieAreaKey, zoneIdByFile } from './damaps/genieArea'
 import { lichTitle } from './mapTypes'
 import { scopedKey } from '../../characterScope'
 import {
@@ -26,6 +31,8 @@ interface Props {
   lichDb:        Map<number, LichRoom>
   imageIndex:    Map<string, LichRoom[]>
   currentRoom?:  LichRoom
+  /** the player's Genie maps, when loaded — used for room placement only */
+  genieZones?:   Map<string, GenieZone>
   character:     string
   onSendCommand: (cmd: string) => void
 }
@@ -50,12 +57,117 @@ interface WorldArea {
 }
 interface World { areas: WorldArea[]; byImage: Map<string, WorldArea>; heads: { name: string; y: number }[]; w: number; h: number }
 
-function buildWorld(lichDb: Map<number, LichRoom>, imageIndex: Map<string, LichRoom[]>): World {
+/**
+ * Where rooms are drawn: the player's Genie maps when available, else Lich's
+ * own tiles laid out on a grid. Either way squares carry Lich room ids.
+ */
+interface MapSource {
+  kind: 'genie' | 'lich'
+  /** one area per map, for Global (Genie: ground floor of each map) */
+  globalKeys: string[]
+  area(key: string): DaArea | null
+  /** the area to show for a Lich room; `prefer` keeps the map you're on when the room is on two */
+  areaOf(lichId: number, prefer?: string): string
+  province(key: string): string
+  /** the other floors of this area's map (Genie), ground floor first */
+  floors(key: string): string[]
+  /** with a Genie source: how many map squares matched a Lich room */
+  stats?: { nodes: number; matched: number }
+}
+
+function lichSource(lichDb: Map<number, LichRoom>, imageIndex: Map<string, LichRoom[]>): MapSource {
+  const layout = getLayout(lichDb, imageIndex)
+  const cache = new Map<string, DaArea>()
+  return {
+    kind: 'lich',
+    globalKeys: [...layout.imageIndex.keys()],
+    area(key) {
+      if (!key) return null
+      let a = cache.get(key)
+      if (!a) {
+        const rooms = layout.imageIndex.get(key)
+        if (!rooms) return null
+        a = buildArea(key, rooms, lichDb, layout)
+        cache.set(key, a)
+      }
+      return a
+    },
+    areaOf: id => layout.areaOf.get(id) ?? '',
+    province: key => areaProvince(key, layout.imageIndex.get(key) ?? []),
+    floors: key => [key],
+  }
+}
+
+function genieSource(zones: Map<string, GenieZone>, lichDb: Map<number, LichRoom>): MapSource {
+  const match: GenieMatch = matchGenieToLich(zones, lichDb)
+  const files = zoneIdByFile(zones)
+  const cache = new Map<string, DaArea>()
+  // Lich room → every area key it's drawn in (a room can sit on two maps).
+  const keysOf = new Map<number, string[]>()
+  for (const [lid, nodes] of match.nodesOf) {
+    const keys: string[] = []
+    for (const { zoneId, nodeId } of nodes) {
+      const n = zones.get(zoneId)?.nodes.find(x => x.id === nodeId)
+      if (n) keys.push(genieAreaKey(zoneId, n.z))
+    }
+    keysOf.set(lid, keys)
+  }
+  const provinceOf = new Map<string, string>()
+  return {
+    kind: 'genie',
+    globalKeys: [...zones.values()].filter(z => z.nodes.length).map(z => genieAreaKey(z.id, genieLevels(z)[0])),
+    area(key) {
+      let a = cache.get(key)
+      if (!a) {
+        const k = parseGenieAreaKey(key)
+        const zone = k && zones.get(k.zoneId)
+        if (!zone) return null
+        a = buildGenieArea(zone, k.level, match, lichDb, files)
+        cache.set(key, a)
+      }
+      return a
+    },
+    areaOf(id, prefer) {
+      const keys = keysOf.get(id) ?? []
+      if (prefer && keys.includes(prefer)) return prefer
+      const pz = prefer ? parseGenieAreaKey(prefer)?.zoneId : undefined
+      return keys.find(k => parseGenieAreaKey(k)?.zoneId === pz) ?? keys[0] ?? ''
+    },
+    province(key) {
+      let p = provinceOf.get(key)
+      if (!p) {
+        const a = this.area(key)
+        const rooms = (a?.rooms ?? []).map(r => (r.lich !== null ? lichDb.get(r.lich) : undefined)).filter((r): r is LichRoom => !!r)
+        p = areaProvince(a?.name ?? key, rooms)
+        provinceOf.set(key, p)
+      }
+      return p
+    },
+    floors(key) {
+      const k = parseGenieAreaKey(key)
+      const zone = k && zones.get(k.zoneId)
+      return zone ? genieLevels(zone).map(l => genieAreaKey(zone.id, l)) : [key]
+    },
+    stats: match.stats,
+  }
+}
+
+const sourceCache = new WeakMap<Map<number, LichRoom>, { zones: Map<string, GenieZone> | null; src: MapSource }>()
+function getSource(lichDb: Map<number, LichRoom>, imageIndex: Map<string, LichRoom[]>, zones: Map<string, GenieZone> | undefined): MapSource {
+  const z = zones && zones.size ? zones : null
+  const hit = sourceCache.get(lichDb)
+  if (hit && hit.zones === z) return hit.src
+  const src = z ? genieSource(z, lichDb) : lichSource(lichDb, imageIndex)
+  sourceCache.set(lichDb, { zones: z, src })
+  return src
+}
+
+function buildWorld(src: MapSource): World {
   const groups = new Map<string, WorldArea[]>()
-  for (const [image, rooms] of getLayout(lichDb, imageIndex).imageIndex) {
-    const area = getArea(lichDb, imageIndex, image)
+  for (const image of src.globalKeys) {
+    const area = src.area(image)
     if (!area || area.rooms.length === 0) continue
-    const province = areaProvince(image, rooms)
+    const province = src.province(image)
     const bw = Math.max(1, area.bbox.x2 - area.bbox.x1), bh = Math.max(1, area.bbox.y2 - area.bbox.y1)
     // capped so a tiny area (1-3 rooms) isn't blown up to fill its cell
     const sc = Math.min(G_THUMB / bw, G_THUMB / bh, 1.5)
@@ -82,7 +194,7 @@ function buildWorld(lichDb: Map<number, LichRoom>, imageIndex: Map<string, LichR
   }
   return { areas, byImage: new Map(areas.map(a => [a.image, a])), heads, w: G_COLS * G_CELL, h: y }
 }
-const worldCache = new WeakMap<Map<number, LichRoom>, World>()
+const worldCache = new WeakMap<MapSource, World>()
 /** "Zoluren 1 Crossing" → "Crossing": the province heading already says where. */
 function shortAreaName(name: string): string {
   const out = name.replace(/^(zoluren|therengia|ilithi|ilitha|ilithia|forfedhdar|qi|taisidon)\b\s*/i, '')
@@ -90,32 +202,12 @@ function shortAreaName(name: string): string {
   return out || name
 }
 
-// One parsed area per (database, tile) — areas describe the world, not a
-// character, so sharing across panels is safe. Keyed weakly on the db Map so a
-// reloaded database drops the old areas.
-const areaCache = new WeakMap<Map<number, LichRoom>, Map<string, DaArea>>()
-// Every room gets a position: hand-placed image_coords where Lich has them,
-// otherwise placed beside its neighbours (daMapsLayout). Built once per DB.
+// The grid layout of Lich's own tiles (the fallback source). Built once per DB.
 const layoutCache = new WeakMap<Map<number, LichRoom>, DaLayout>()
 function getLayout(lichDb: Map<number, LichRoom>, imageIndex: Map<string, LichRoom[]>): DaLayout {
   let l = layoutCache.get(lichDb)
   if (!l) { l = buildLayout(lichDb, imageIndex); layoutCache.set(lichDb, l) }
   return l
-}
-
-function getArea(lichDb: Map<number, LichRoom>, imageIndex: Map<string, LichRoom[]>, image: string): DaArea | null {
-  if (!image) return null
-  let perDb = areaCache.get(lichDb)
-  if (!perDb) { perDb = new Map(); areaCache.set(lichDb, perDb) }
-  let a = perDb.get(image)
-  if (!a) {
-    const layout = getLayout(lichDb, imageIndex)
-    const rooms = layout.imageIndex.get(image)
-    if (!rooms) return null
-    a = buildArea(image, rooms, lichDb, layout)
-    perDb.set(image, a)
-  }
-  return a
 }
 
 const sectionHead: CSSProperties = {
@@ -124,23 +216,26 @@ const sectionHead: CSSProperties = {
 }
 const muted: CSSProperties = { color: 'var(--map-text-muted, #888)' }
 
-export default function DaMapsView({ lichDb, imageIndex, currentRoom, character, onSendCommand }: Props) {
+export default function DaMapsView({ lichDb, imageIndex, currentRoom, genieZones, character, onSendCommand }: Props) {
   // ── Areas ──────────────────────────────────────────────────────────────────
   const [mode, setMode] = useState<'local' | 'global'>('local')
-  // The whole world is built once per map database (~60ms) the first time
-  // Global is opened, then cached.
+  const src = useMemo(() => getSource(lichDb, imageIndex, genieZones), [lichDb, imageIndex, genieZones])
+  // The whole world is built the first time Global is opened, then cached.
   const world = useMemo(() => {
-    if (mode !== 'global' && !worldCache.has(lichDb)) return null
-    let w = worldCache.get(lichDb)
-    if (!w) { w = buildWorld(lichDb, imageIndex); worldCache.set(lichDb, w) }
+    if (mode !== 'global' && !worldCache.has(src)) return null
+    let w = worldCache.get(src)
+    if (!w) { w = buildWorld(src); worldCache.set(src, w) }
     return w
-  }, [mode, lichDb, imageIndex])
+  }, [mode, src])
   const [hoverArea, setHoverArea] = useState<string | null>(null)
 
-  const hereImage = currentRoom ? getLayout(lichDb, imageIndex).areaOf.get(currentRoom.id) ?? '' : ''
-  const [areaImage, setAreaImage] = useState<string>(hereImage)
+  const [areaImage, setAreaImage] = useState<string>('')
+  const hereImage = currentRoom ? src.areaOf(currentRoom.id, areaImage) : ''
   const [followPlayer, setFollowPlayer] = useState(true)
-  const area = useMemo(() => getArea(lichDb, imageIndex, areaImage), [lichDb, imageIndex, areaImage])
+  const area = useMemo(() => src.area(areaImage), [src, areaImage])
+  useEffect(() => { if (!areaImage && hereImage) setAreaImage(hereImage) }, [areaImage, hereImage])
+  // A different source (Genie maps just loaded) uses different area keys.
+  useEffect(() => { setAreaImage(currentRoom ? src.areaOf(currentRoom.id) : '') }, [src]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Camera ─────────────────────────────────────────────────────────────────
   const [transform, setTransform] = useState<Transform>({ x: 0, y: 0, scale: 1 })
@@ -171,7 +266,7 @@ export default function DaMapsView({ lichDb, imageIndex, currentRoom, character,
   }, [])
 
   // Follow the player across areas; recentre when they move (only while following).
-  const hereRoom = area && currentRoom ? area.byId.get(currentRoom.id) : undefined
+  const hereRoom = area && currentRoom ? area.byLich.get(currentRoom.id) : undefined
   useEffect(() => {
     if (followPlayer && hereImage && hereImage !== areaImage) setAreaImage(hereImage)
   }, [followPlayer, hereImage, areaImage])
@@ -217,6 +312,11 @@ export default function DaMapsView({ lichDb, imageIndex, currentRoom, character,
       if (localTfRef.current && fittedFor.current === area?.image) setTransform(localTfRef.current)
     }
   }, [mode, world]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  /** a Genie map's ground floor, for a boundary marker that names the map */
+  function genieGround(zoneId: string): string {
+    return src.floors(genieAreaKey(zoneId, 0))[0] ?? genieAreaKey(zoneId, 0)
+  }
 
   function openArea(image: string) {
     setAreaImage(image)
@@ -324,8 +424,8 @@ export default function DaMapsView({ lichDb, imageIndex, currentRoom, character,
         onMouseEnter={() => { if (!dragRef.current?.moved) { setHoverBuilding(i); setHoverId(null) } }}
         onContextMenu={e => {
           e.preventDefault()
-          const first = b.rooms[0]
-          if (first !== undefined) onSendCommand(`;go2 ${first}`)
+          const first = b.rooms.map(id => area!.byId.get(id)?.lich).find(l => l != null)
+          if (first != null) onSendCommand(`;go2 ${first}`)
         }}
       />
     ))
@@ -334,26 +434,33 @@ export default function DaMapsView({ lichDb, imageIndex, currentRoom, character,
   const roomRects = useMemo(() => {
     if (!area) return null
     return area.rooms.filter(r => showIndoor || !r.indoor).map(r => {
-      const cat = r.category ? DA_CATEGORIES[r.category] : undefined
+      // The Genie map maker's colour wins; otherwise the Lich tags' category.
+      const fill = r.fill ?? (r.category ? DA_CATEGORIES[r.category].color : undefined)
       const s = r.size
       return (
         <g key={r.id}>
           <rect x={r.x - s / 2} y={r.y - s / 2} width={s} height={s}
-            fill={cat?.color ?? 'var(--map-node-fill, #2a2a2a)'}
-            stroke={cat ? 'none' : 'var(--map-node-stroke, #555)'} strokeWidth={1} vectorEffect="non-scaling-stroke"
+            fill={fill ?? 'var(--map-node-fill, #2a2a2a)'}
+            stroke={fill ? 'none' : 'var(--map-node-stroke, #555)'} strokeWidth={1} vectorEffect="non-scaling-stroke"
+            strokeDasharray={r.lich === null && !r.stubTo ? '1.5 1.5' : undefined}
             style={{ cursor: 'pointer' }}
             onMouseEnter={() => { if (!dragRef.current?.moved) { setHoverId(r.id); setHoverBuilding(null) } }}
             onClick={() => {
               if (dragRef.current?.moved) return
+              if (r.stubTo) { openArea(genieGround(r.stubTo)); return }
               setPinnedId(p => (p === r.id ? null : r.id))
               setTab('room'); setShowPanel(true)
             }}
-            onContextMenu={e => { e.preventDefault(); onSendCommand(`;go2 ${r.id}`) }}
+            onContextMenu={e => { e.preventDefault(); if (r.lich !== null) onSendCommand(`;go2 ${r.lich}`) }}
           />
+          {r.stubTo && (
+            <text x={r.x} y={r.y} fontSize={s + 2} fontWeight="bold" fill="var(--map-arc-special, #ffb74d)"
+              textAnchor="middle" dominantBaseline="central" pointerEvents="none">↗</text>
+          )}
         </g>
       )
     })
-  }, [area, showIndoor, onSendCommand])
+  }, [area, showIndoor, onSendCommand, src]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const labels = useMemo(() => {
     if (!area) return null
@@ -363,7 +470,13 @@ export default function DaMapsView({ lichDb, imageIndex, currentRoom, character,
         fill="var(--map-text-muted, #999)" pointerEvents="none"
         style={{ fontFamily: 'var(--font-mono, monospace)' }}>{r.label}</text>
     ))
-    return [...roomLabels, ...area.buildings
+    // Genie maps: the place names their makers set down.
+    const texts = (area.texts ?? []).map((t, i) => (
+      <text key={`t${i}`} x={t.x + 1} y={t.y + 1} fontSize={LABEL_FONT} fontStyle="italic"
+        dominantBaseline="text-before-edge" fill="var(--map-text-muted, #999)" pointerEvents="none"
+        style={{ fontFamily: 'var(--font-mono, monospace)' }}>{t.text}</text>
+    ))
+    return [...texts, ...roomLabels, ...area.buildings
       .filter(b => b.name && b.showLabel)
       .map((b, i) => (
         <text key={`l${i}`} x={b.lx} y={b.ly} fontSize={LABEL_FONT}
@@ -394,7 +507,7 @@ export default function DaMapsView({ lichDb, imageIndex, currentRoom, character,
         {world.areas.map(wa => {
           const byFill = new Map<string, string[]>()
           for (const r of wa.area.rooms) {
-            const fill = r.category ? DA_CATEGORIES[r.category].color : 'var(--map-node-stroke, #555)'
+            const fill = r.fill ?? (r.category ? DA_CATEGORIES[r.category].color : 'var(--map-node-stroke, #555)')
             const sz = Math.max(r.size, 2 / wa.s)
             if (!byFill.has(fill)) byFill.set(fill, [])
             byFill.get(fill)!.push(`M${r.x - sz / 2},${r.y - sz / 2}h${sz}v${sz}h${-sz}z`)
@@ -431,7 +544,7 @@ export default function DaMapsView({ lichDb, imageIndex, currentRoom, character,
   const globalHere = (() => {
     if (!world || !currentRoom || !hereImage) return null
     const wa = world.byImage.get(hereImage)
-    const r = wa?.area.byId.get(currentRoom.id)
+    const r = wa?.area.byLich.get(currentRoom.id)
     if (!wa || !r) return null
     const cx = wa.ox + r.x * wa.s, cy = wa.oy + r.y * wa.s
     return (
@@ -476,12 +589,19 @@ export default function DaMapsView({ lichDb, imageIndex, currentRoom, character,
   const shownSource = pinnedId !== null ? 'pinned' : hoverId !== null ? 'hovered' : 'your room'
   const shownBuilding = hoverBuilding !== null && pinnedId === null && area ? area.buildings[hoverBuilding] : undefined
 
-  const presentCats = useMemo(() => {
-    if (mode === 'global') return Object.keys(DA_CATEGORIES)
-    if (!area) return []
-    const s = new Set(area.rooms.map(r => r.category).filter((c): c is string => !!c))
-    return Object.keys(DA_CATEGORIES).filter(k => s.has(k))
-  }, [area, mode])
+  // Legend: Genie maps use the community's colour meanings; Lich tiles use the
+  // categories read from Lich's tags.
+  const legendColors = useMemo(() => {
+    if (src.kind === 'genie') {
+      const used = new Set((area?.rooms ?? []).map(r => r.fill?.toUpperCase()).filter(Boolean))
+      return Object.entries(COLOR_LEGEND)
+        .filter(([hex]) => mode === 'global' || used.has(hex))
+        .map(([hex, c]) => ({ key: hex, color: hex, name: c.name, desc: c.desc }))
+    }
+    const used = new Set((area?.rooms ?? []).map(r => r.category).filter((c): c is string => !!c))
+    return Object.keys(DA_CATEGORIES).filter(k => mode === 'global' || used.has(k))
+      .map(k => ({ key: k, color: DA_CATEGORIES[k].color, name: DA_CATEGORIES[k].name, desc: DA_CATEGORIES[k].desc }))
+  }, [area, mode, src])
   const presentArcs = useMemo(() => {
     if (!area) return []
     const s = new Set(area.arcs.map(a => a.cat))
@@ -489,8 +609,27 @@ export default function DaMapsView({ lichDb, imageIndex, currentRoom, character,
   }, [area])
 
   function roomDetails(r: DaRoom) {
-    const mana = obs.mana[r.id] ?? {}
-    const found = obs.forage[r.id] ?? {}
+    if (r.stubTo) {
+      const to = src.area(genieGround(r.stubTo))
+      return (
+        <>
+          <div style={{ fontWeight: 'bold' }}>{to?.name ?? 'Another map'}</div>
+          <div style={{ ...muted, marginTop: 6, fontStyle: 'italic' }}>Click to open that map</div>
+        </>
+      )
+    }
+    if (r.lich === null) {
+      return (
+        <>
+          <div style={{ fontWeight: 'bold' }}>{r.title || '(unnamed room)'}</div>
+          <div style={{ ...muted, marginTop: 6 }}>
+            On the Genie map, but not matched to a Lich room, so it has no details and go2 can't take you there.
+          </div>
+        </>
+      )
+    }
+    const mana = obs.mana[r.lich] ?? {}
+    const found = obs.forage[r.lich] ?? {}
     const foundItems = Object.entries(found).sort((a, b) => b[1].n - a[1].n)
     const lichForage = r.forage.filter(f => !found[f.toLowerCase()])
     return (
@@ -498,7 +637,7 @@ export default function DaMapsView({ lichDb, imageIndex, currentRoom, character,
         <div style={{ ...muted, fontSize: '0.91em' }}>{shownSource}</div>
         <div style={{ fontWeight: 'bold', marginTop: 2 }}>{r.title || '(unnamed room)'}</div>
         <div style={{ ...muted, fontSize: '0.91em' }}>
-          Lich #{r.id} · {r.indoor ? 'indoor' : 'outdoor'}{r.location ? ` · ${r.location}` : ''}
+          Lich #{r.lich} · {r.indoor ? 'indoor' : 'outdoor'}{r.location ? ` · ${r.location}` : ''}
         </div>
 
         <div style={sectionHead}>Mana</div>
@@ -603,12 +742,26 @@ export default function DaMapsView({ lichDb, imageIndex, currentRoom, character,
           }}>⊡</button>
         <button className={`map-btn${showPanel ? ' map-btn--active' : ''}`} onClick={() => setShowPanel(s => !s)}
           title={showPanel ? 'Hide the side panel' : 'Show the side panel (legend and room details)'}>▤</button>
+        {mode === 'local' && area && src.floors(area.image).length > 1 && (
+          <span style={{ display: 'inline-flex', gap: 3, marginLeft: 6, alignItems: 'center' }} title="This map has more than one floor">
+            <span style={muted}>Floor</span>
+            {src.floors(area.image).map(k => {
+              const lv = parseGenieAreaKey(k)?.level ?? 0
+              return (
+                <button key={k} className={`map-btn map-btn--sm${k === area.image ? ' map-btn--active' : ''}`}
+                  onClick={() => { setAreaImage(k); setFollowPlayer(k === hereImage) }}>
+                  {lv === 0 ? 'Ground' : lv > 0 ? `+${lv}` : lv}
+                </button>
+              )
+            })}
+          </span>
+        )}
         <span style={{ flex: 1 }} />
       </div>
 
       {unplaced && (
         <div className="map-hint" style={{ padding: '3px 8px', color: 'var(--map-arc-special, #ffb74d)', flexShrink: 0 }}>
-          ⚑ Your room ({lichTitle(currentRoom!)}, Lich #{currentRoom!.id}) has no {DA_MAPS_NAME} position yet
+          ⚑ Your room ({lichTitle(currentRoom!)}, Lich #{currentRoom!.id}) {src.kind === 'genie' ? 'isn\'t on your Genie maps' : `has no ${DA_MAPS_NAME} position yet`}
         </div>
       )}
 
@@ -659,11 +812,10 @@ export default function DaMapsView({ lichDb, imageIndex, currentRoom, character,
             <div style={{ flex: 1, overflowY: 'auto', overscrollBehavior: 'contain', padding: '6px 9px', lineHeight: 1.4 }}>
               {tab === 'legend' && (
                 <>
-                  {presentCats.length > 0 && <div style={{ ...sectionHead, marginTop: 0 }}>Room colors</div>}
-                  {presentCats.map(k => {
-                    const c = DA_CATEGORIES[k]
+                  {legendColors.length > 0 && <div style={{ ...sectionHead, marginTop: 0 }}>Room colors</div>}
+                  {legendColors.map(c => {
                     return (
-                      <div key={k} style={{ display: 'flex', alignItems: 'baseline', gap: 6, marginBottom: 3 }}>
+                      <div key={c.key} style={{ display: 'flex', alignItems: 'baseline', gap: 6, marginBottom: 3 }}>
                         <span style={{ flexShrink: 0, width: 10, height: 10, background: c.color, alignSelf: 'center',
                           border: '1px solid var(--map-border, #555)' }} />
                         <span><b>{c.name}</b><span style={muted}> — {c.desc}</span></span>
