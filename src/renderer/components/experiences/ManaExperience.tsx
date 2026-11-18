@@ -8,7 +8,9 @@
 // again (Kaesken's call).
 //
 // Strength is shown three ways so it never rests on colour alone (§34.7): the
-// word, the ring that fills with it (rank of 21), and the bubble's tint. The
+// word, the ring that fills with it, and the bubble's tint. No step
+// numbers (Kaesken): a character whose senses read fewer steps would see an
+// "of 21" it can't actually tell apart. The
 // hue is the realm's (fixed lore colours, --mana-* in themes.ts). A direction
 // PERCEIVE didn't mention keeps a faint dot, so the layout never shifts
 // (UX #2). The em chain is anchored to --game-font-size (pitfall #58a).
@@ -33,8 +35,8 @@ const REALM_VAR: Record<Realm, string> = {
   Arcane: 'var(--mana-arcane)', Lunar: 'var(--mana-lunar)',
 }
 
-function Bubble({ s, realm, big, label, numbers }: {
-  s?: ManaStrength; realm: Realm | null; big?: boolean; label?: string; numbers: boolean
+function Bubble({ s, realm, big, label }: {
+  s?: ManaStrength; realm: Realm | null; big?: boolean; label?: string
 }) {
   if (!s) {
     return (
@@ -52,9 +54,8 @@ function Bubble({ s, realm, big, label, numbers }: {
   } as CSSProperties
   return (
     <div className={`mx-cell${big ? ' mx-cell--here' : ''}`}>
-      <div className="mx-bubble" style={style} title={`${s.word}: ${s.rank + 1} of ${MANA_WORDS.length}`}>
+      <div className="mx-bubble" style={style} title={s.word}>
         <span className="mx-word">{s.word}</span>
-        {numbers && <span className="mx-num">{s.rank + 1}/{MANA_WORDS.length}</span>}
       </div>
       {label && <span className="mx-dir">{label}</span>}
     </div>
@@ -64,7 +65,6 @@ function Bubble({ s, realm, big, label, numbers }: {
 function ManaExperience({ mana, guild, hidden }: ExperienceProps) {
   const def = experienceById('mana')
   const shown = (id: string) => { const o = def?.options?.find(x => x.id === id); return o ? optionShown(hidden, o) : true }
-  const numbers = shown('numbers')
   const myRealm = guildManaRealm(guild)
 
   if (!mana || (!mana.here && mana.near.length === 0)) {
@@ -99,17 +99,17 @@ function ManaExperience({ mana, guild, hidden }: ExperienceProps) {
       <div className="mx-body">
         <div className="mx-grid">
           {GRID.flat().map(dir => dir === null
-            ? <Bubble key="here" s={mana.here} realm={realm} big numbers={numbers} />
-            : <Bubble key={dir} s={by.get(dir)} realm={realm} label={SHORT[dir]} numbers={numbers} />)}
+            ? <Bubble key="here" s={mana.here} realm={realm} big />
+            : <Bubble key={dir} s={by.get(dir)} realm={realm} label={SHORT[dir]} />)}
         </div>
         <div className="mx-side">
-          <Bubble s={by.get('above')} realm={realm} label="Up" numbers={numbers} />
-          <Bubble s={by.get('below')} realm={realm} label="Down" numbers={numbers} />
+          <Bubble s={by.get('above')} realm={realm} label="Up" />
+          <Bubble s={by.get('below')} realm={realm} label="Down" />
         </div>
       </div>
       {other.length > 0 && (
         <div className="mx-other">
-          {other.map(n => <span key={n.dir}>{n.dir}: {n.word}{numbers ? ` ${n.rank + 1}/${MANA_WORDS.length}` : ''}</span>)}
+          {other.map(n => <span key={n.dir}>{n.dir}: {n.word}</span>)}
         </div>
       )}
     </div>

@@ -1623,7 +1623,6 @@ export const EXPERIENCES: ExperienceDef[] = [
     badge: 'Beta',
     options: [
       { id: 'header',  label: 'Realm and time', desc: 'A strip naming the realm PERCEIVE reported (Life, Holy, Elemental, Arcane) and when you perceived.' },
-      { id: 'numbers', label: 'Step numbers', desc: 'Show each strength as a number of 21 under its word, e.g. "17/21" under brilliant. The ring around each bubble shows the same thing.' },
     ],
     textEquivalent: 'The PERCEIVE reply in the game window.',
   },

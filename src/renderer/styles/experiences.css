@@ -3094,10 +3094,9 @@
 }
 .mx-cell--here .mx-bubble { width: 5.6em; height: 5.6em; padding: 0.3em; }
 .mx-cell--here .mx-bubble::before { inset: 0.3em; }
-.mx-word, .mx-num { position: relative; line-height: 1; text-align: center; color: var(--text-primary); }
+.mx-word { position: relative; line-height: 1; text-align: center; color: var(--text-primary); }
 .mx-word { font-size: 0.6em; white-space: nowrap; }
 .mx-cell--here .mx-word { font-size: 0.76em; font-weight: var(--ui-bold-weight, 600); }
-.mx-num { font-size: 0.58em; color: color-mix(in srgb, var(--text-primary) 75%, transparent); font-variant-numeric: tabular-nums; }
 .mx-bubble { flex-direction: column; gap: 0.1em; }
 .mx-dir { font-size: 0.7em; line-height: 1; color: var(--experience-scene-muted); }
 .mx-none {
