@@ -13,7 +13,7 @@
 import { useState, useRef, useEffect, useMemo, useCallback, type CSSProperties } from 'react'
 import type { LichRoom } from './mapTypes'
 import { COLOR_LEGEND } from './mapTypes'
-import { loadDaWorld, hydrateArea, loadManaSeed, DA_ROOM_SIZE, type DaWorld, type DaManaSeed } from './damaps/damapsWorld'
+import { loadDaWorld, hydrateArea, DA_ROOM_SIZE, type DaWorld } from './damaps/damapsWorld'
 import { lichTitle } from './mapTypes'
 import { scopedKey } from '../../characterScope'
 import {
@@ -140,12 +140,6 @@ const sectionHead: CSSProperties = {
   marginTop: 8, marginBottom: 4,
 }
 const muted: CSSProperties = { color: 'var(--map-text-muted, #888)' }
-
-/** A Da'Maps square's own code, for a room Lich hasn't mapped: "g:1@0#123".
- *  Mana logged by hand for such a room uses this code instead of a Lich ID. */
-export function squareCode(areaKey: string, id: number): string {
-  return `${areaKey}#${id}`
-}
 
 /** Black or white, whichever reads better on a square's fill colour. */
 function inkOn(fill: string): string {
@@ -355,8 +349,6 @@ function DaMapsCanvas({ world: daWorld, lichDb, currentRoom, character, onSendCo
 
   // Observations (mana / forage) — re-read when the capture records something.
   const [obs, setObs] = useState<DaObservations>(() => loadObservations())
-  const [seed, setSeed] = useState<DaManaSeed | null>(null)
-  useEffect(() => { let live = true; loadManaSeed().then(s => { if (live) setSeed(s) }); return () => { live = false } }, [])
   useEffect(() => {
     const h = () => setObs({ ...loadObservations() })
     document.addEventListener(DA_OBS_EVENT, h)
@@ -622,7 +614,7 @@ function DaMapsCanvas({ world: daWorld, lichDb, currentRoom, character, onSendCo
       const mine = realm === myRealm
       const pct = m && m.rank >= 0 ? ((m.rank + 1) / MANA_WORDS.length) * 100 : 0
       return (
-        <div key={realm} title={m ? `${m.text}${m.near ? '\n(from a PERCEIVE in the next room)' : ''}` : 'This room\'s mana hasn\'t been mapped yet'}
+        <div key={realm} title={m ? `${m.text}\n(${new Date(m.at).toLocaleString()}${m.near ? ', from a PERCEIVE in the next room' : ''})` : 'Uncharted: PERCEIVE here to chart it'}
           style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 3,
             color: mine ? 'var(--map-current-color, #e0a050)' : undefined }}>
           <span style={{ width: 72, flexShrink: 0, fontWeight: mine ? 'bold' : undefined }}>{mine ? '▸ ' : ''}{realm}</span>
@@ -630,7 +622,7 @@ function DaMapsCanvas({ world: daWorld, lichDb, currentRoom, character, onSendCo
             <span style={{ display: 'block', height: 6, width: `${pct}%`,
               background: mine ? 'var(--map-current-color, #e0a050)' : 'var(--map-text-muted, #777)' }} />
           </span>
-          <span style={{ minWidth: 70, textAlign: 'right', whiteSpace: 'nowrap', ...(m ? {} : muted) }}>{m ? m.word : 'not mapped'}</span>
+          <span style={{ minWidth: 70, textAlign: 'right', whiteSpace: 'nowrap', ...(m ? {} : muted) }}>{m ? m.word : 'uncharted'}</span>
         </div>
       )
     })
@@ -650,7 +642,6 @@ function DaMapsCanvas({ world: daWorld, lichDb, currentRoom, character, onSendCo
         </>
       )
     }
-    const code = area ? squareCode(area.image, r.id) : ''
     if (r.lich === null) {
       return (
         <>
@@ -658,20 +649,10 @@ function DaMapsCanvas({ world: daWorld, lichDb, currentRoom, character, onSendCo
           <div style={{ ...muted, marginTop: 6 }}>
             Not in Lich's map yet, so go2 can't take you there.
           </div>
-          {window.api.damapsDev && (
-            // mapper tools only (LICHBORNE_DAMAPS_DEV=1): the code a hand-written mana reading uses
-            <div style={{ marginTop: 6 }}>
-              <span style={muted}>Square code: </span><code>{code}</code>{' '}
-              <button className="map-btn" title="Copy the square code (use it to log this room's mana by hand)"
-                onClick={() => window.api.writeClipboard(code)}>Copy</button>
-            </div>
-          )}
-          <div style={sectionHead}>Mana</div>
-          {manaRows(seed?.rooms[code] ?? {})}
         </>
       )
     }
-    const mana = seed?.rooms[r.lich] ?? seed?.rooms[code] ?? {}
+    const mana = obs.mana[r.lich] ?? {}
     const found = obs.forage[r.lich] ?? {}
     const foundItems = Object.entries(found).sort((a, b) => b[1].n - a[1].n)
     const lichForage = r.forage.filter(f => !found[f.toLowerCase()])

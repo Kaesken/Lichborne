@@ -14,7 +14,7 @@
 import type { LichRoom } from '../mapTypes'
 import { lichTitle } from '../mapTypes'
 import {
-  type DaArea, type DaArc, type DaArcCategory, type DaBuilding, type DaRoom, type Realm, type ManaReading,
+  type DaArea, type DaArc, type DaArcCategory, type DaBuilding, type DaRoom,
   splitTags, isIndoor,
 } from './daMapsData'
 
@@ -137,41 +137,4 @@ export function hydrateArea(a: DaWorldArea, lichDb: Map<number, LichRoom>): DaAr
     ? { x1: Math.min(...xs), y1: Math.min(...ys), x2: Math.max(...xs), y2: Math.max(...ys) }
     : { x1: 0, y1: 0, x2: 100, y2: 100 }
   return { image: a.key, name: a.name, rooms, byId, byLich, arcs, buildings, bbox, texts }
-}
-
-// ── Mana readings built into Da'Maps ─────────────────────────────────────────
-//
-// public/damaps-mana-seed.json, built by tools/damaps/build-mana-seed.mjs from
-// damaps-mana.log files: one reading per room and realm, shipped so every
-// player sees mana without perceiving first. They are Da'Maps' only source of
-// mana: a room's mana doesn't change, and these are full-scale (21-step)
-// readings checked before they go in.
-
-export interface DaManaSeed {
-  made: string
-  /** Lich room id → realm → reading (built into Da'Maps) */
-  rooms: Record<string, Partial<Record<Realm, ManaReading>>>
-}
-
-let seedLoading: Promise<DaManaSeed | null> | null = null
-export function loadManaSeed(): Promise<DaManaSeed | null> {
-  if (!seedLoading) {
-    seedLoading = readJson('./damaps-mana-seed.json').then(raw => {
-      const f = raw as { version?: number; made?: string; words?: string[]; rooms?: Record<string, Record<string, number[]>> }
-      if (f?.version !== 1 || !f.rooms || !Array.isArray(f.words)) return null
-      const at = Date.parse(f.made ?? '') || 0
-      const rooms: DaManaSeed['rooms'] = {}
-      for (const [id, realms] of Object.entries(f.rooms)) {
-        const out: Partial<Record<Realm, ManaReading>> = {}
-        for (const [realm, [lv, near]] of Object.entries(realms)) {
-          if (!(lv >= 1 && lv <= f.words.length)) continue
-          out[realm as Realm] = { word: f.words[lv - 1], rank: lv - 1, at, near: !!near,
-            text: 'Read by the Da\'Maps mana tour' }
-        }
-        rooms[id] = out
-      }
-      return { made: f.made ?? '', rooms }
-    }, () => null)
-  }
-  return seedLoading
 }
