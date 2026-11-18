@@ -15,11 +15,10 @@ import type { LichRoom } from './mapTypes'
 import { COLOR_LEGEND } from './mapTypes'
 import { loadDaWorld, hydrateArea, DA_ROOM_SIZE, type DaWorld } from './damaps/damapsWorld'
 import { lichTitle } from './mapTypes'
-import { scopedKey } from '../../characterScope'
 import {
-  DA_MAPS_NAME, DA_ARC_COLOR, DA_CATEGORIES, DA_OBS_EVENT, ROOM_REALMS, MANA_WORDS,
-  LABEL_FONT, CHAR_W, guildRealm, loadObservations, PROVINCE_ORDER,
-  type DaArea, type DaRoom, type DaArcCategory, type Realm, type DaObservations, type ManaReading,
+  DA_MAPS_NAME, DA_ARC_COLOR, DA_CATEGORIES, DA_OBS_EVENT,
+  LABEL_FONT, CHAR_W, loadObservations, PROVINCE_ORDER,
+  type DaArea, type DaRoom, type DaArcCategory, type DaObservations,
 } from './damaps/daMapsData'
 
 interface Props {
@@ -355,12 +354,6 @@ function DaMapsCanvas({ world: daWorld, lichDb, currentRoom, character, onSendCo
     return () => document.removeEventListener(DA_OBS_EVENT, h)
   }, [])
 
-  // The character's realm, from its guild once Lichborne has seen it (INFO);
-  // that realm is marked in the mana list.
-  const myRealm: Realm | null = useMemo(() => {
-    try { return guildRealm(localStorage.getItem(scopedKey(character, 'detectedGuild'))) } catch { return null }
-  }, [character])
-
   // ── Drawing ────────────────────────────────────────────────────────────────
   const arcPaths = useMemo(() => {
     if (!area) return null
@@ -608,26 +601,6 @@ function DaMapsCanvas({ world: daWorld, lichDb, currentRoom, character, onSendCo
     return (['cardinal', 'go', 'climb'] as DaArcCategory[]).filter(c => s.has(c))
   }, [area])
 
-  function manaRows(mana: Partial<Record<Realm, ManaReading>>) {
-    return ROOM_REALMS.map(realm => {
-      const m = mana[realm]
-      const mine = realm === myRealm
-      const pct = m && m.rank >= 0 ? ((m.rank + 1) / MANA_WORDS.length) * 100 : 0
-      return (
-        <div key={realm} title={m ? `${m.text}\n(${new Date(m.at).toLocaleString()}${m.near ? ', from a PERCEIVE in the next room' : ''})` : 'Uncharted: PERCEIVE here to chart it'}
-          style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 3,
-            color: mine ? 'var(--map-current-color, #e0a050)' : undefined }}>
-          <span style={{ width: 72, flexShrink: 0, fontWeight: mine ? 'bold' : undefined }}>{mine ? '▸ ' : ''}{realm}</span>
-          <span style={{ flex: 1, height: 6, background: 'var(--map-btn-bg, #222)', borderRadius: 2, overflow: 'hidden' }}>
-            <span style={{ display: 'block', height: 6, width: `${pct}%`,
-              background: mine ? 'var(--map-current-color, #e0a050)' : 'var(--map-text-muted, #777)' }} />
-          </span>
-          <span style={{ minWidth: 70, textAlign: 'right', whiteSpace: 'nowrap', ...(m ? {} : muted) }}>{m ? m.word : 'uncharted'}</span>
-        </div>
-      )
-    })
-  }
-
   function roomDetails(r: DaRoom) {
     if (r.stubTo) {
       const to = src.area(r.stubTo)
@@ -652,7 +625,6 @@ function DaMapsCanvas({ world: daWorld, lichDb, currentRoom, character, onSendCo
         </>
       )
     }
-    const mana = obs.mana[r.lich] ?? {}
     const found = obs.forage[r.lich] ?? {}
     const foundItems = Object.entries(found).sort((a, b) => b[1].n - a[1].n)
     const lichForage = r.forage.filter(f => !found[f.toLowerCase()])
@@ -663,12 +635,6 @@ function DaMapsCanvas({ world: daWorld, lichDb, currentRoom, character, onSendCo
         <div style={{ ...muted, fontSize: '0.91em' }}>
           Lich #{r.lich} · {r.indoor ? 'indoor' : 'outdoor'}{r.location ? ` · ${r.location}` : ''}
         </div>
-
-        <div style={sectionHead}>Mana</div>
-        {myRealm === 'Lunar' && (
-          <div style={{ ...muted, marginBottom: 4 }}>Lunar mana follows the moons, not the room.</div>
-        )}
-        {manaRows(mana)}
 
         <div style={sectionHead}>Forage</div>
         {foundItems.length === 0 && lichForage.length === 0 && <div style={muted}>Nothing known yet</div>}

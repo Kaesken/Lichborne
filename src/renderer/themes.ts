@@ -327,6 +327,13 @@ export const darkBase: ThemeVars = {
   '--spell-band-ok':   'color-mix(in srgb, #35b04a 75%, var(--text-primary))',
   '--spell-band-mid':  'color-mix(in srgb, #e0a81c 75%, var(--text-primary))',
   '--spell-band-crit': 'color-mix(in srgb, #e04040 75%, var(--text-primary))',
+  // Mana Experience realm hues: fixed lore colours, mixed toward the text
+  // colour so each stays readable on light and dark themes (pitfall #63).
+  '--mana-life':      'color-mix(in srgb, #4aa8e8 75%, var(--text-primary))',
+  '--mana-holy':      'color-mix(in srgb, #d8a820 75%, var(--text-primary))',
+  '--mana-elemental': 'color-mix(in srgb, #e85a28 75%, var(--text-primary))',
+  '--mana-arcane':    'color-mix(in srgb, #8a50c8 75%, var(--text-primary))',
+  '--mana-lunar':     'color-mix(in srgb, #9aa8d8 75%, var(--text-primary))',
   // Spell Monitor SKILL BADGES — one hue per magic skill / ability type, so a
   // glance groups "all my Augmentations" without reading a word. Same
   // self-correcting mix as the bands, and all twelve are exposed in the Theme

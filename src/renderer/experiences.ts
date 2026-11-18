@@ -20,9 +20,11 @@ import type { Contact, ContactTemplate } from './contacts'
 import type { FloatRect } from './freeLayout'
 import type { DirectedVerb } from './utils/sayTo'
 import type { PlaceKey } from './components/experiences/tableauPlaces'
+import type { ManaView } from './manaPerceive'
 import TableauExperience from './components/experiences/TableauExperience'
 import MoonsExperience from './components/experiences/MoonsExperience'
 import SpellMonitorExperience from './components/experiences/SpellMonitorExperience'
+import ManaExperience from './components/experiences/ManaExperience'
 
 // ── Weather & Moons state (Experience #2, v0.15.0) ─────────────────────────
 // Source of truth: the community `moonwatch.lic` script (read 2026-07-07,
@@ -1451,6 +1453,9 @@ export interface ExperienceProps {
   // no memo and costs the other Experiences nothing. A component reading it
   // must own a clock that re-renders it — a ref write triggers no render.
   spellsPulse?: { current: SpellPulse }
+  // Mana Experience: this room's latest PERCEIVE (manaPerceive.ts). Absent
+  // until you PERCEIVE in the room you're in; dropped when you move.
+  mana?: ManaView
   // Refresh the sky info: SILENTLY send TIME + WEATHER (no echo, replies consumed)
   // and arm the indoor-refusal window. One click updates both readouts.
   onSyncSky?: () => void
@@ -1602,6 +1607,25 @@ export const EXPERIENCES: ExperienceDef[] = [
       { id: 'moonskin',   label: 'Moonskin',           desc: 'When Rakash next take their moonskin form, and for how long, or when the one in progress ends. It lasts exactly while Katamba is full, and is computed from the moons\' phase (it matches Elanthipedia\'s moonskin table to the minute). It shows in the footer and in Katamba\'s hover; each moon\'s next full is in its hover text.' },
     ],
     textEquivalent: 'The Moons stream panel (moonwatch\'s own window) and `perceive moons`; sunrise/sunset announce themselves in the main window; weather is the WEATHER command / any sky-glance.',
+  },
+  {
+    // The latest PERCEIVE as a compass: your room in the centre, the rooms
+    // around it that PERCEIVE named in their directions. Remembers nothing:
+    // blank until you PERCEIVE, cleared when you move (manaPerceive.ts).
+    id: 'mana',
+    games: ['DR'],
+    label: 'Mana',
+    kind: 'instrument',
+    desc: 'The mana your last PERCEIVE reported: your room in the centre, with the rooms around it in their directions. Clears when you move.',
+    component: ManaExperience,
+    defaultRect: { x: 0.66, y: 0.08, w: 0.26, h: 0.42 },
+    chrome: 'standard',
+    badge: 'Beta',
+    options: [
+      { id: 'header',  label: 'Realm and time', desc: 'A strip naming the realm PERCEIVE reported (Life, Holy, Elemental, Arcane) and when you perceived.' },
+      { id: 'numbers', label: 'Step numbers', desc: 'Show each strength as a number of 21 under its word, e.g. "17/21" under brilliant. The ring around each bubble shows the same thing.' },
+    ],
+    textEquivalent: 'The PERCEIVE reply in the game window.',
   },
   {
     // Experience #3 (v0.19.5). The id is deliberately NOT 'spells': tab ids are

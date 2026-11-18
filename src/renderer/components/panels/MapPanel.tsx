@@ -366,7 +366,7 @@ export default memo(function MapPanel({ roomTitle = '', roomDesc = '', roomExits
   // Da'Maps: tell the PERCEIVE / FORAGE capture which Lich room this character
   // is standing in, so a reading is filed under the right room.
   useEffect(() => {
-    daMapsSetRoom(character, currentRoom?.id, currentRoom?.wayto)
+    daMapsSetRoom(character, currentRoom?.id)
   }, [character, currentRoom])
 
   // ── Load Genie XML progressively ─────────────────────────────────────────────

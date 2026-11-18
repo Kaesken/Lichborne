@@ -86,6 +86,7 @@ import ExperienceLayer from './ExperienceLayer'
 import ExperienceShelf from './ExperienceShelf'
 import { SORT_MODES, type SortMode } from '../expParse'
 import { resolvePlace, type PlaceKey } from './experiences/tableauPlaces'
+import { isPerceiveCommand, isScriptPerceiveEcho, readManaLine, guildManaRealm, MANA_WINDOW_MS, type ManaView } from '../manaPerceive'
 import { EXPERIENCES, experienceById, experienceAvailable, defaultHiddenMap, loadExperiences, saveExperiences, deriveSpellState, parseGroupLines, type GroupState, parseMoonLine, mergeMoonReport, parseTimeLine, SUN_RISE_RE, SUN_SET_RE, WEATHER_GLANCE_RE, type ExperienceInstance, type SceneCast, type SceneSpeechItem, type SceneMoveItem, type MoonsState, type WeatherInfo, type CalendarInfo, type SpellState, type SceneMoment, type SpellPulse, emptySpellPulse, recordSpellPulse, SPELL_ENDED_TTL_MS, type FaceTurn } from '../experiences'
 import { parseCombatPosition, parseCombatBalance, parseCombatRange, parseAssessLine, RANGE_ORDER, parseFaceReply, mayBeEngagementLine, parseEngagementLine, applyEngagement, stepOutRange, balanceFromAssessStatus, mayBeStrikeLine, parseStrikeLine, type CombatRange, type AssessEntity, type Engagement, type EngagementEvent, type StrikeEvent } from '../../shared/combatExtract'
 import { guildToFocusOption } from '../focusTemplates'
@@ -778,6 +779,8 @@ export default function GameWindow({
       setWalkedOut(prev => (Object.keys(prev).length > 0 ? {} : prev))
       streamRoomRef.current = { title: null, navId: null }
       pendingFaceRef.current = null
+      manaArmRef.current = null
+      setManaView(null)
       setCombatRange(null)
       assessAccumRef.current = []
       assessOpenRef.current = false
@@ -939,6 +942,13 @@ export default function GameWindow({
   // own-sheet `info` detection first, then Edit Profile's Guild field.
   const [characterGuild, setCharacterGuild] = useState<string | null>(() =>
     localStorage.getItem(scopedKey(profile, 'detectedGuild')))
+  const characterGuildRef = useRef(characterGuild)
+  characterGuildRef.current = characterGuild
+  // Mana Experience: the latest PERCEIVE in THIS room only (manaPerceive.ts).
+  // Armed by sending PERCEIVE (or a Lich script's "[x]>perceive" echo), filled
+  // by the reply's lines, dropped on any room change (noteRoomChange).
+  const [manaView, setManaView] = useState<ManaView | null>(null)
+  const manaArmRef = useRef<{ at: number; view: ManaView } | null>(null)
   useEffect(() => {
     if (characterGuild) return
     // DR guilds only: a GS4 profession (an "empath" among them) must not
@@ -1161,7 +1171,8 @@ export default function GameWindow({
   const streamRoomRef = useRef<{ title: string | null; navId: number | null }>({ title: null, navId: null })
   const pendingFaceRef = useRef<{ id: string | null; at: number } | null>(null)
   const noteSentRef = useRef((cmd: string) => {
-    daMapsObserveCommand(profile, cmd)   // Da'Maps: PERCEIVE / FORAGE capture
+    daMapsObserveCommand(profile, cmd)   // Da'Maps: FORAGE capture
+    if (isPerceiveCommand(cmd)) manaArmRef.current = { at: Date.now(), view: { realm: null, near: [], at: Date.now() } }
     const m = /^\s*face\s+(?:#(\d+)|\S.*)$/i.exec(cmd)
     if (m) pendingFaceRef.current = { id: m[1] ?? null, at: Date.now() }
   })
@@ -3275,6 +3286,9 @@ export default function GameWindow({
       const batchWalk: [string, number][] = []
       const noteRoomChange = () => {
         batchRoomChanged = true
+        // the Mana window shows only this room's latest PERCEIVE
+        manaArmRef.current = null
+        setManaView(prev => (prev ? null : prev))
         batchEngage.length = 0
         batchEngageAt.length = 0
         batchWalk.length = 0
@@ -3478,7 +3492,18 @@ export default function GameWindow({
               // the TOP of this case — before the log push — via suppressSync.)
               if (!suppressSync) {
                 processLineRef.current('main', lineText)
-                daMapsObserveLine(profile, lineText)   // Da'Maps: PERCEIVE / FORAGE capture
+                daMapsObserveLine(profile, lineText)   // Da'Maps: FORAGE capture
+                // Mana Experience: read a PERCEIVE reply (cheap no-op otherwise)
+                if (isScriptPerceiveEcho(lineText)) {
+                  manaArmRef.current = { at: Date.now(), view: { realm: null, near: [], at: Date.now() } }
+                } else if (manaArmRef.current) {
+                  const arm = manaArmRef.current
+                  if (Date.now() - arm.at > MANA_WINDOW_MS) manaArmRef.current = null
+                  else {
+                    const next = readManaLine(arm.view, lineText, guildManaRealm(characterGuildRef.current))
+                    if (next) { arm.view = next; setManaView(next) }
+                  }
+                }
                 processHighlightSoundsRef.current(lineText)
                 logHighlightFiresRef.current(lineText, 'main')
               }
@@ -6451,6 +6476,7 @@ export default function GameWindow({
         spells={spellsState}
         spellsPulse={spellPulseRef}
         group={groupState}
+        mana={manaView ?? undefined}
       />
     )
   }
