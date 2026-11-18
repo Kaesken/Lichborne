@@ -34,6 +34,8 @@ export interface DaLayout {
 export const UNMAPPED_PREFIX = '~'
 /** how far apart hand-placed rooms are moved (room squares keep their size) */
 export const SPREAD = 2.5
+/** interior tiles keep their drawn shape at this scale (tighter than streets) */
+const BLOCK_SCALE = 1.6
 
 const DIRS: Record<string, [number, number]> = {
   north: [0, -1], n: [0, -1],
@@ -153,8 +155,13 @@ export function buildLayout(lichDb: Map<number, LichRoom>, imageIndex: Map<strin
   const out: DaLayout = { imageIndex: new Map(), pos: new Map(), size: new Map(), areaOf: new Map() }
   const geo = new Map<string, AreaGeo>()
 
+  // Interior tiles (a guild, a society, a block of shops drawn on their own
+  // Lich image) are folded into the town they open onto.
+  const interiorOf = findInteriorTiles(lichDb, imageIndex)
+
   // 1. Hand-placed rooms, spread apart.
   for (const [image, rooms] of imageIndex) {
+    if (interiorOf.has(image)) continue
     const list = rooms.filter(hasCoords)
     if (!list.length) continue
     const sizes: number[] = []
@@ -264,6 +271,100 @@ export function buildLayout(lichDb: Map<number, LichRoom>, imageIndex: Map<strin
     out.imageIndex.get(area)!.push(lichDb.get(id)!)
   }
 
+  function placeBlock(area: string, comp: LichRoom[]) {
+    const g = geo.get(area)!
+    const u = g.unit, step = u * 2, gap = u * 0.75
+    const ids = new Set(comp.map(r => r.id))
+    // The block's own shape, from its hand-drawn coords.
+    const local = new Map<number, [number, number]>()
+    for (const r of comp) {
+      const c = r.image_coords!
+      local.set(r.id, [((c[0] + c[2]) / 2) * BLOCK_SCALE, ((c[1] + c[3]) / 2) * BLOCK_SCALE])
+    }
+    // Rooms the tile draws on top of each other get nudged apart.
+    const own = new Space(step)
+    for (const r of comp) {
+      let [x, y] = local.get(r.id)!
+      for (let ring = 1; ring <= 12 && own.roomNear(x, y, u / 2, 2); ring++) {
+        let done = false
+        for (let ix = -ring; ix <= ring && !done; ix++) for (let iy = -ring; iy <= ring && !done; iy++) {
+          if (Math.max(Math.abs(ix), Math.abs(iy)) !== ring) continue
+          const nx = x + ix * u * 1.5, ny = y + iy * u * 1.5
+          if (!own.roomNear(nx, ny, u / 2, 2)) { x = nx; y = ny; done = true }
+        }
+      }
+      local.set(r.id, [x, y])
+      own.addRoom(x, y, u)
+    }
+    // Its door: a room in the block joined to a positioned room in the town.
+    let door: { inner: number; outer: [number, number]; dir: [number, number] | null } | null = null
+    for (const r of comp) {
+      for (const { to, dir } of links.get(r.id) ?? []) {
+        if (out.areaOf.get(to) === area && !ids.has(to)) { door = { inner: r.id, outer: out.pos.get(to)!, dir: dir ? [-dir[0], -dir[1]] : null }; break }
+      }
+      if (door) break
+    }
+    const anchorLocal = door ? local.get(door.inner)! : local.get(comp[0].id)!
+    let anchor: [number, number]
+    if (door) {
+      const [dx, dy] = door.dir ?? [0, 1]
+      anchor = [door.outer[0] + dx * step * 2, door.outer[1] + dy * step * 2]
+    } else {
+      let maxY = 0
+      for (const r of out.imageIndex.get(area)!) maxY = Math.max(maxY, out.pos.get(r.id)![1])
+      anchor = [0, maxY + step * 4]
+    }
+    const inner: [number, number, number, number][] = []
+    for (const r of comp) for (const { to } of links.get(r.id) ?? []) {
+      if (ids.has(to) && to > r.id) {
+        const a = local.get(r.id)!, b = local.get(to)!
+        inner.push([a[0], a[1], b[0], b[1]])
+      }
+    }
+    const fits = (ox: number, oy: number) => {
+      for (const [x, y] of local.values()) {
+        if (g.space.roomNear(x + ox, y + oy, u / 2, gap)) return false
+        if (g.space.lineThrough(x + ox, y + oy, u / 2 + gap / 2)) return false
+      }
+      for (const [x1, y1, x2, y2] of inner) if (g.space.segmentBlocked(x1 + ox, y1 + oy, x2 + ox, y2 + oy, gap / 3)) return false
+      if (door) {
+        const [ix, iy] = local.get(door.inner)!
+        if (g.space.segmentBlocked(door.outer[0], door.outer[1], ix + ox, iy + oy, gap / 3)) return false
+      }
+      return true
+    }
+    const baseX = anchor[0] - anchorLocal[0], baseY = anchor[1] - anchorLocal[1]
+    let off: [number, number] | null = null
+    for (let ring = 0; ring <= 40 && !off; ring++) {
+      let bd = Infinity
+      for (let ix = -ring; ix <= ring; ix++) for (let iy = -ring; iy <= ring; iy++) {
+        if (Math.max(Math.abs(ix), Math.abs(iy)) !== ring) continue
+        const d = ix * ix + iy * iy
+        if (d >= bd) continue
+        const ox = baseX + ix * step, oy = baseY + iy * step
+        if (fits(ox, oy)) { bd = d; off = [ox, oy] }
+      }
+    }
+    if (!off) {
+      // Nowhere near: set it down below everything else in the area.
+      let maxY = 0
+      for (const r of out.imageIndex.get(area)!) maxY = Math.max(maxY, out.pos.get(r.id)![1])
+      const minY = Math.min(...[...local.values()].map(p => p[1]))
+      off = [baseX, maxY + step * 3 - minY]
+    }
+    for (const r of comp) {
+      const [x, y] = local.get(r.id)!
+      const p: [number, number] = [x + off[0], y + off[1]]
+      out.pos.set(r.id, p)
+      out.size.set(r.id, u)
+      out.areaOf.set(r.id, area)
+      out.imageIndex.get(area)!.push(r)
+      g.space.addRoom(p[0], p[1], u)
+    }
+    for (const [x1, y1, x2, y2] of inner) g.space.addLine(x1 + off[0], y1 + off[1], x2 + off[0], y2 + off[1])
+    if (door) { const p = out.pos.get(door.inner)!; g.space.addLine(door.outer[0], door.outer[1], p[0], p[1]) }
+  }
+
   const grow = (start: number[]) => {
     let frontier = start
     while (frontier.length) {
@@ -279,6 +380,29 @@ export function buildLayout(lichDb: Map<number, LichRoom>, imageIndex: Map<strin
       frontier = next
     }
   }
+
+  // 1b. Interior tiles: each connected group of their rooms keeps its own
+  // hand-drawn shape and is set down as a block beside its door in the town,
+  // on the nearest spot where none of it overlaps anything.
+  const blocks: { area: string; rooms: LichRoom[] }[] = []
+  for (const [child, parent] of interiorOf) {
+    const list = (imageIndex.get(child) ?? []).filter(hasCoords)
+    const ids = new Set(list.map(r => r.id))
+    const seen = new Set<number>()
+    for (const r of list) {
+      if (seen.has(r.id)) continue
+      const comp: LichRoom[] = []
+      const stack = [r.id]; seen.add(r.id)
+      while (stack.length) {
+        const id = stack.pop()!
+        comp.push(lichDb.get(id)!)
+        for (const { to } of links.get(id) ?? []) if (ids.has(to) && !seen.has(to)) { seen.add(to); stack.push(to) }
+      }
+      blocks.push({ area: parent, rooms: comp })
+    }
+  }
+  blocks.sort((a, b) => b.rooms.length - a.rooms.length)
+  for (const b of blocks) placeBlock(b.area, b.rooms)
 
   // Breadth-first from every positioned room at once, so each unplaced room
   // joins the area of the nearest positioned room.
@@ -307,4 +431,46 @@ export function buildLayout(lichDb: Map<number, LichRoom>, imageIndex: Map<strin
     grow([r.id])
   }
   return out
+}
+
+/**
+ * Lich draws many buildings on their own image (a guild, a society, a block
+ * of shops). Such a tile belongs in the town it opens onto when:
+ *  - most of its rooms are indoors,
+ *  - the town is the area it connects to most, and is bigger than it,
+ *  - it is reached by walking both ways (a door, not a portal or a script),
+ *    which keeps event realms and portal destinations out.
+ */
+export function findInteriorTiles(lichDb: Map<number, LichRoom>, imageIndex: Map<string, LichRoom[]>): Map<string, string> {
+  const areaOf = new Map<number, string>()
+  const count = new Map<string, number>()
+  for (const [image, rooms] of imageIndex) for (const r of rooms) if (hasCoords(r)) {
+    areaOf.set(r.id, image); count.set(image, (count.get(image) ?? 0) + 1)
+  }
+  const walk = (m: unknown) => typeof m === 'string' && !/^;|portal/i.test(m.trim())
+  const result = new Map<string, string>()
+  for (const [image, rooms] of imageIndex) {
+    const list = rooms.filter(hasCoords)
+    if (!list.length) continue
+    const indoor = list.filter(r => (r.paths?.[0] ?? '').startsWith('Obvious exits')).length
+    if (indoor < list.length * 0.5) continue
+    const out = new Map<string, number>(), back = new Map<string, number>()
+    for (const r of list) for (const [k, m] of Object.entries(r.wayto ?? {})) {
+      const t = areaOf.get(Number(k))
+      if (t && t !== image && walk(m)) out.set(t, (out.get(t) ?? 0) + 1)
+    }
+    for (const [other, rs] of imageIndex) {
+      if (other === image || !out.has(other)) continue
+      for (const r of rs) for (const [k, m] of Object.entries(r.wayto ?? {})) {
+        if (areaOf.get(Number(k)) === image && walk(m)) back.set(other, (back.get(other) ?? 0) + 1)
+      }
+    }
+    const best = [...out.entries()].filter(([o]) => back.has(o)).sort((a, b) => (b[1] + back.get(b[0])!) - (a[1] + back.get(a[0])!))[0]
+    if (!best) continue
+    if ((count.get(best[0]) ?? 0) <= list.length) continue
+    result.set(image, best[0])
+  }
+  // Don't chain: a tile folded into another interior tile stays separate.
+  for (const [child, parent] of [...result]) if (result.has(parent)) result.delete(child)
+  return result
 }
