@@ -224,7 +224,8 @@ export function splitTags(tags: string[] | undefined): { forage: string[]; hunti
 
 // ── Observations: mana + forage seen by players (local store) ─────────────────
 
-export interface ManaReading { word: string; rank: number; text: string; at: number }
+/** `near`: reported by PERCEIVE in a neighbouring room, not taken in the room itself */
+export interface ManaReading { word: string; rank: number; text: string; at: number; near?: boolean }
 export interface ForageFind  { n: number; at: number }
 export interface DaObservations {
   mana:   Record<string, Partial<Record<Realm, ManaReading>>>   // by Lich room id
@@ -263,6 +264,40 @@ export function recordMana(roomId: number, realm: Realm, word: string, text: str
   const room = { ...(o.mana[roomId] ?? {}) }
   room[realm] = { word: word.toLowerCase(), rank, text, at: Date.now() }
   saveObservations({ ...o, mana: { ...o.mana, [roomId]: room } })
+}
+
+/**
+ * Merge the readings in a damaps-mana.log (written by the damaps-mana.lic Lich
+ * script) into the observations. Tab-separated:
+ *   time character lich_id direction realm word level out_of room_title raw_line
+ * A room's own reading ("here") beats one a neighbour reported; otherwise the
+ * newer reading wins. Lunar is ignored (it follows the moons, not the room).
+ * Returns how many readings changed.
+ */
+export function importManaLog(text: string): number {
+  const o = loadObservations()
+  const mana = { ...o.mana }
+  let changed = 0
+  for (const line of text.split(/\r?\n/)) {
+    const c = line.split('\t')
+    if (c.length < 8 || !/^\d+$/.test(c[2])) continue
+    const realm = c[4] as Realm
+    if (!ROOM_REALMS.includes(realm)) continue
+    const level = Number(c[6]), outOf = Number(c[7])
+    if (!(level >= 1 && outOf >= level)) continue
+    const rank = outOf === MANA_WORDS.length ? level - 1 : Math.max(0, Math.round((level / outOf) * MANA_WORDS.length) - 1)
+    const at = Date.parse(c[0].replace(' ', 'T')) || 0
+    const near = c[3] !== 'here'
+    const prev = mana[c[2]]?.[realm]
+    if (prev && ((near && !prev.near) || (near === !!prev.near && prev.at >= at))) continue
+    mana[c[2]] = { ...(mana[c[2]] ?? {}), [realm]: {
+      word: c[5], rank, at, near,
+      text: `${c[9] ?? ''}${c[1] ? ` (${c[1]})` : ''}`,
+    } }
+    changed++
+  }
+  if (changed) saveObservations({ ...o, mana })
+  return changed
 }
 
 export function recordForage(roomId: number, item: string): void {

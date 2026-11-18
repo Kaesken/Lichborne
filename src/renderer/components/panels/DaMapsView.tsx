@@ -18,13 +18,15 @@ import { lichTitle } from './mapTypes'
 import { scopedKey } from '../../characterScope'
 import {
   DA_MAPS_NAME, DA_ARC_COLOR, DA_CATEGORIES, DA_OBS_EVENT, ROOM_REALMS, MANA_WORDS,
-  LABEL_FONT, CHAR_W, guildRealm, loadObservations, PROVINCE_ORDER,
+  LABEL_FONT, CHAR_W, guildRealm, loadObservations, importManaLog, PROVINCE_ORDER,
   type DaArea, type DaRoom, type DaArcCategory, type Realm, type DaObservations,
 } from './damaps/daMapsData'
 
 interface Props {
   lichDb:        Map<number, LichRoom>
   currentRoom?:  LichRoom
+  /** damaps-mana.log in Lich's data folder (written by damaps-mana.lic) */
+  manaLogPath?:  string
   character:     string
   onSendCommand: (cmd: string) => void
 }
@@ -141,6 +143,26 @@ const sectionHead: CSSProperties = {
 }
 const muted: CSSProperties = { color: 'var(--map-text-muted, #888)' }
 
+/** Read damaps-mana.log now and every minute while Da'Maps is open. */
+const MANA_LOG_EVERY_MS = 60_000
+function useManaLog(path: string | undefined) {
+  const last = useRef<string | null>(null)
+  useEffect(() => {
+    if (!path) return
+    let live = true
+    const read = () => {
+      window.api.readFile(path).then(text => {
+        if (!live || text == null || text === last.current) return
+        last.current = text
+        importManaLog(text)
+      }, () => { /* no log yet */ })
+    }
+    read()
+    const t = setInterval(read, MANA_LOG_EVERY_MS)
+    return () => { live = false; clearInterval(t) }
+  }, [path])
+}
+
 /** "You are here", the same sonar ping as Lichborne's other maps: two rings
  *  expanding half a cycle apart (map-panel.css `.genie-here-ping`, stopped by
  *  epilepsy-safe mode) over a solid ring on the square. */
@@ -157,7 +179,8 @@ function HerePing({ x, y, size }: { x: number; y: number; size: number }) {
   )
 }
 
-export default function DaMapsView({ lichDb, currentRoom, character, onSendCommand }: Props) {
+export default function DaMapsView({ lichDb, currentRoom, manaLogPath, character, onSendCommand }: Props) {
+  useManaLog(manaLogPath)
   // Da'Maps' own map, loaded once (a separate chunk).
   const [daWorld, setDaWorld] = useState<DaWorld | null>(null)
   const [worldError, setWorldError] = useState<string | null>(null)
@@ -639,7 +662,7 @@ function DaMapsCanvas({ world: daWorld, lichDb, currentRoom, character, onSendCo
           const mine = realm === myRealm
           const pct = m && m.rank >= 0 ? ((m.rank + 1) / MANA_WORDS.length) * 100 : 0
           return (
-            <div key={realm} title={m ? `${m.text}\n(${new Date(m.at).toLocaleString()})` : 'No PERCEIVE reading recorded here yet'}
+            <div key={realm} title={m ? `${m.text}\n(${new Date(m.at).toLocaleString()}${m.near ? ', from a PERCEIVE in the next room' : ''})` : 'No PERCEIVE reading recorded here yet'}
               style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 3,
                 color: mine ? 'var(--map-current-color, #e0a050)' : undefined }}>
               <span style={{ width: 72, flexShrink: 0, fontWeight: mine ? 'bold' : undefined }}>{mine ? '▸ ' : ''}{realm}</span>
@@ -647,7 +670,7 @@ function DaMapsCanvas({ world: daWorld, lichDb, currentRoom, character, onSendCo
                 <span style={{ display: 'block', height: 6, width: `${pct}%`,
                   background: mine ? 'var(--map-current-color, #e0a050)' : 'var(--map-text-muted, #777)' }} />
               </span>
-              <span style={{ width: 70, textAlign: 'right', ...(m ? {} : muted) }}>{m ? m.word : 'no reading'}</span>
+              <span style={{ minWidth: 70, textAlign: 'right', whiteSpace: 'nowrap', ...(m ? {} : muted) }}>{m ? m.word : 'no reading'}</span>
             </div>
           )
         })}
