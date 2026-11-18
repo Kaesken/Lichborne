@@ -14,7 +14,9 @@
 //   4. its neighbours on the Genie map: the Lich candidate whose exits lead to
 //      the Lich rooms its Genie neighbours already matched (repeat until
 //      nothing changes)
-// Anything still ambiguous stays unmatched rather than guessed: it's drawn,
+// When Lich has an old copy of a room beside the real one, the real one (it
+// has the game's room number) wins. Anything still ambiguous stays unmatched
+// rather than guessed: it's drawn,
 // but has no Lich room behind it.
 //
 // Pure and React-free.
@@ -44,6 +46,12 @@ const COMPASS: Record<string, string> = {
 }
 const exitKey = (m: unknown) => typeof m === 'string' ? COMPASS[m.trim().toLowerCase()] : undefined
 const descKey = (s: string) => s.replace(/\s+/g, ' ').trim().toLowerCase()
+
+/** a room the game itself knows (Lich has its game room number) */
+function hasGameId(r: LichRoom): boolean {
+  const u = (r as { uid?: unknown }).uid
+  return Array.isArray(u) ? u.length > 0 : typeof u === 'number'
+}
 
 function lichExits(r: LichRoom): string {
   const s = new Set<string>()
@@ -116,6 +124,13 @@ export function matchGenieToLich(zones: Map<string, GenieZone>, lichDb: Map<numb
         const ge = genieExits(node)
         const byExits = cands.filter(c => lichExits(c) === ge)
         if (byExits.length) cands = byExits
+      }
+      if (cands.length > 1) {
+        // Lich sometimes keeps an old copy of a room beside the real one (same
+        // name and exits, the room's other description, no game room number).
+        // The real one is the one the game knows: it has a game room number.
+        const real = cands.filter(hasGameId)
+        if (real.length) cands = real
       }
       if (cands.length === 1) lichOf.set(nodeKey(zone.id, node.id), cands[0].id)
       else pending.push({ zone, node, cands })

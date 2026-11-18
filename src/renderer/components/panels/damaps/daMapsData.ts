@@ -110,8 +110,8 @@ export function guildRealm(guild: string | null | undefined): Realm | null {
 export interface DaRoom {
   id:       number           // unique within the area (the Lich id when it has one)
   lich:     number | null    // the Lich room behind this square (null = not matched)
-  fill?:    string           // colour set by the map maker (Genie maps)
-  stubTo?:  string           // area key this square stands in for (Genie boundary marker)
+  fill?:    string           // colour set by the map maker (the map file)
+  stubTo?:  string           // area key this square stands in for (a ↗ marker to another map)
   x:        number           // centre, in the area tile's pixel space
   y:        number
   size:     number           // drawn square size
@@ -150,7 +150,7 @@ export interface DaArea {
   bbox:      { x1: number; y1: number; x2: number; y2: number }
   /** the square for a Lich room id */
   byLich:    Map<number, DaRoom>
-  /** free-standing place names drawn by the map maker (Genie maps) */
+  /** free-standing place names drawn by the map maker (the map file) */
   texts?:    { text: string; x: number; y: number }[]
 }
 

@@ -571,7 +571,7 @@ function DaMapsCanvas({ world: daWorld, lichDb, currentRoom, character, onSendCo
         <>
           <div style={{ fontWeight: 'bold' }}>{r.title || '(unnamed room)'}</div>
           <div style={{ ...muted, marginTop: 6 }}>
-            On the Genie map, but not matched to a Lich room, so it has no details and go2 can't take you there.
+            Not linked to a Lich room yet, so it has no details and go2 can't take you there.
           </div>
         </>
       )
