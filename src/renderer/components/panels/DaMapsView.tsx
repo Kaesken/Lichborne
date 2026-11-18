@@ -128,7 +128,7 @@ function genieSource(allZones: Map<string, GenieZone>, lichDb: Map<number, LichR
         const k = parseGenieAreaKey(key)
         const zone = k && zones.get(k.zoneId)
         if (!zone) return null
-        a = buildGenieArea(zone, k.level, match, lichDb, files)
+        a = buildGenieArea(zone, k.level, match, lichDb, files, id => this.areaOf(id))
         cache.set(key, a)
       }
       return a
@@ -319,12 +319,9 @@ export default function DaMapsView({ lichDb, imageIndex, currentRoom, genieZones
     }
   }, [mode, world]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  /** a Genie map's ground floor, for a boundary marker that names the map */
-  function genieGround(zoneId: string): string {
-    return src.floors(genieAreaKey(zoneId, 0))[0] ?? genieAreaKey(zoneId, 0)
-  }
-
-  function openArea(image: string) {
+  function openArea(key: string) {
+    // a marker may name a map's floor 0 when its ground floor is another level
+    const image = src.area(key) ? key : (src.floors(key)[0] ?? key)
     setAreaImage(image)
     setFollowPlayer(image === hereImage)
     localTfRef.current = null
@@ -453,7 +450,7 @@ export default function DaMapsView({ lichDb, imageIndex, currentRoom, genieZones
             onMouseEnter={() => { if (!dragRef.current?.moved) { setHoverId(r.id); setHoverBuilding(null) } }}
             onClick={() => {
               if (dragRef.current?.moved) return
-              if (r.stubTo) { openArea(genieGround(r.stubTo)); return }
+              if (r.stubTo) { openArea(r.stubTo); return }
               setPinnedId(p => (p === r.id ? null : r.id))
               setTab('room'); setShowPanel(true)
             }}
@@ -616,9 +613,10 @@ export default function DaMapsView({ lichDb, imageIndex, currentRoom, genieZones
 
   function roomDetails(r: DaRoom) {
     if (r.stubTo) {
-      const to = src.area(genieGround(r.stubTo))
+      const to = src.area(r.stubTo)
       return (
         <>
+          {r.title && r.title !== to?.name && <div style={muted}>{r.title}</div>}
           <div style={{ fontWeight: 'bold' }}>{to?.name ?? 'Another map'}</div>
           <div style={{ ...muted, marginTop: 6, fontStyle: 'italic' }}>Click to open that map</div>
         </>

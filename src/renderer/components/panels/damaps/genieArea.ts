@@ -8,7 +8,7 @@
 //
 // Area keys are `g:<zoneId>@<level>`; Genie maps can have several floors.
 
-import type { GenieZone, LichRoom } from '../mapTypes'
+import type { GenieZone, GenieNode, LichRoom } from '../mapTypes'
 import { lichTitle } from '../mapTypes'
 import {
   type DaArea, type DaArc, type DaBuilding, type DaRoom,
@@ -26,7 +26,8 @@ export function parseGenieAreaKey(key: string): { zoneId: string; level: number 
 
 /** the floors a Genie map has, ground floor first */
 export function genieLevels(zone: GenieZone): number[] {
-  const s = new Set(zone.nodes.map(n => n.z))
+  const s = new Set(zone.nodes.filter(n => !isStub(n)).map(n => n.z))
+  if (!s.size) s.add(0)
   return [...s].sort((a, b) => (a === 0 ? -1 : b === 0 ? 1 : a - b))
 }
 
@@ -40,13 +41,25 @@ export function zoneIdByFile(zones: Map<string, GenieZone>): Map<string, string>
 export function buildGenieArea(
   zone: GenieZone, level: number, match: GenieMatch,
   lichDb: Map<number, LichRoom>, fileToZone: Map<string, string>,
+  /** the area key a Lich room is drawn in, for exits that leave this one */
+  areaOfLich: (lichId: number) => string = () => '',
 ): DaArea {
+  // A boundary marker belongs on the floor of the room it's joined to: Genie
+  // sometimes parks one on another floor so it doesn't crowd the map, which
+  // would leave it floating there with no line.
+  const nodeZ = new Map(zone.nodes.map(n => [n.id, n.z]))
+  const zOf = (n: GenieNode) => {
+    if (!isStub(n)) return n.z
+    for (const a of n.arcs) { const z = a.destination ? nodeZ.get(a.destination) : undefined; if (z !== undefined) return z }
+    return n.z
+  }
   const rooms: DaRoom[] = []
   const byId = new Map<number, DaRoom>()      // keyed by Genie node id (unique in a zone)
   const byLich = new Map<number, DaRoom>()
 
   for (const n of zone.nodes) {
-    if (n.z !== level) continue
+    if (zOf(n) !== level) continue
+    if (!n.name.trim()) continue            // unnamed placeholder squares
     const lid = match.lichOf.get(nodeKey(zone.id, n.id)) ?? null
     const r = lid !== null ? lichDb.get(lid) : undefined
     const tags = splitTags(r?.tags)
@@ -54,7 +67,8 @@ export function buildGenieArea(
     let stubTo: string | undefined
     if (isStub(n)) {
       const file = (n.note!.match(/[^|]*\.xml/i)?.[0] ?? '').trim().toLowerCase()
-      stubTo = fileToZone.get(file)
+      const z = fileToZone.get(file)
+      if (z) stubTo = genieAreaKey(z, 0)
     }
     const room: DaRoom = {
       id: n.id,
@@ -82,7 +96,7 @@ export function buildGenieArea(
   const seen = new Set<string>()
   const arcs: DaArc[] = []
   for (const n of zone.nodes) {
-    if (n.z !== level) continue
+    if (!byId.has(n.id)) continue
     for (const a of n.arcs) {
       if (a.hidden || !byId.has(a.destination) || a.destination === n.id) continue
       const k = n.id < a.destination ? `${n.id}-${a.destination}` : `${a.destination}-${n.id}`
@@ -90,6 +104,98 @@ export function buildGenieArea(
       seen.add(k)
       arcs.push({ a: n.id, b: a.destination, cat: classifyMove(a.move) })
     }
+  }
+
+  // ── No square left unattached ────────────────────────────────────────────
+  // Some squares have no drawn line: the Genie map hides their exit (a long
+  // `go portal`), the exit leads to another floor or map, or the map's makers
+  // never drew one. For each such square, in order:
+  //   1. draw its hidden exits after all;
+  //   2. draw Lich's exits to rooms on this floor;
+  //   3. for exits to another floor or map, set a small ↗ marker right beside
+  //      it (click it to go there), joined to it by a short line.
+  const degree = new Map<number, number>()
+  const bump = (id: number) => degree.set(id, (degree.get(id) ?? 0) + 1)
+  for (const a of arcs) { bump(a.a); bump(a.b) }
+  const addArc = (a: number, b: number, move: string) => {
+    const k = a < b ? `${a}-${b}` : `${b}-${a}`
+    if (seen.has(k)) return
+    seen.add(k)
+    arcs.push({ a, b, cat: classifyMove(move) })
+    bump(a); bump(b)
+  }
+  const nodeById = new Map(zone.nodes.map(n => [n.id, n]))
+  let nextMarker = -1
+  const near = (x: number, y: number) => rooms.some(o => Math.abs(o.x - x) < GENIE_ROOM_SIZE + 2 && Math.abs(o.y - y) < GENIE_ROOM_SIZE + 2)
+  const addMarker = (from: DaRoom, to: string, title: string) => {
+    if (!to) return false
+    const step = GENIE_ROOM_SIZE * 2
+    const spots: [number, number][] = [[step, 0], [0, -step], [-step, 0], [0, step], [step, -step], [-step, -step], [-step, step], [step, step]]
+    const spot = spots.find(([dx, dy]) => !near(from.x + dx, from.y + dy))
+    if (!spot) return false
+    const m: DaRoom = {
+      id: nextMarker--, lich: null, stubTo: to,
+      x: from.x + spot[0], y: from.y + spot[1], size: GENIE_ROOM_SIZE,
+      lx: 0, ly: 0, title, indoor: false, category: null, forage: [], hunting: [], services: [],
+      exits: [], crossTo: [to], label: '', building: null, location: '',
+    }
+    rooms.push(m); byId.set(m.id, m)
+    addArc(from.id, m.id, 'go')
+    return true
+  }
+  for (const r of [...rooms]) {
+    if (degree.get(r.id) || r.stubTo) continue
+    const n = nodeById.get(r.id)!
+    // 1. hidden exits on this floor
+    for (const a of n.arcs) if (a.hidden && byId.has(a.destination) && a.destination !== r.id) addArc(r.id, a.destination, a.move)
+    if (degree.get(r.id)) continue
+    // 2. Lich's exits to rooms on this floor
+    const lr = r.lich !== null ? lichDb.get(r.lich) : undefined
+    const out: { lich: number; move: string }[] = []
+    for (const [k, mv] of Object.entries(lr?.wayto ?? {})) if (typeof mv === 'string') out.push({ lich: Number(k), move: mv })
+    for (const o of out) { const t = byLich.get(o.lich); if (t && t.id !== r.id) addArc(r.id, t.id, o.move) }
+    if (degree.get(r.id)) continue
+    // 3. a marker for an exit to another floor or map
+    let done = false
+    for (const a of n.arcs) {
+      const d = a.destination ? nodeById.get(a.destination) : undefined
+      if (d && d.z !== level) { done = addMarker(r, genieAreaKey(zone.id, d.z), `${d.z > level ? 'Up' : 'Down'} to ${d.name}`); if (done) break }
+    }
+    if (!done) for (const o of out) {
+      const key = areaOfLich(o.lich)
+      if (key && key !== genieAreaKey(zone.id, level)) {
+        const t = lichDb.get(o.lich)
+        done = addMarker(r, key, t ? lichTitle(t) : 'Another map')
+        if (done) break
+      }
+    }
+  }
+
+  // 4. What's still alone is something the map's makers drew without an exit:
+  //    a ↗ marker set beside its door, a maze square (its exits are random,
+  //    so Genie draws none), or a cell you're put in. Join it to the nearest
+  //    square it belongs with: for a marker, any room; for a maze square, its
+  //    maze neighbours; otherwise a room of the same building.
+  const dist = (a: DaRoom, b: DaRoom) => Math.hypot(a.x - b.x, a.y - b.y)
+  const MAX_NEAR = GENIE_ROOM_SIZE * 8
+  for (const r of [...rooms]) {
+    if (degree.get(r.id)) continue
+    const n = nodeById.get(r.id)
+    const maze = !r.stubTo && !!n && n.arcs.length > 0 && n.arcs.every(a => !a.destination)
+    const others = rooms.filter(o => o.id !== r.id && dist(o, r) <= MAX_NEAR)
+    if (maze) {
+      // its maze neighbours: same-named squares one step away
+      const step = Math.min(...others.filter(o => o.title === r.title).map(o => dist(o, r)), Infinity)
+      for (const o of others) if (o.title === r.title && dist(o, r) <= step * 1.5) addArc(r.id, o.id, 'go')
+      if (degree.get(r.id)) continue
+    }
+    const pick = (list: DaRoom[]) => list.sort((a, b) => dist(a, r) - dist(b, r))[0]
+    const target = r.stubTo
+      ? pick(others.filter(o => !o.stubTo))
+      : pick(others.filter(o => !o.stubTo && buildingName(o.title) === buildingName(r.title))) ?? pick(others.filter(o => !o.stubTo))
+    // a marker is always beside its door, however sparse the map round it
+    const far = !target && r.stubTo ? pick(rooms.filter(o => o.id !== r.id && !o.stubTo)) : undefined
+    if (target ?? far) addArc(r.id, (target ?? far)!.id, 'go')
   }
 
   // Buildings: indoor rooms joined on the map that share a name.
