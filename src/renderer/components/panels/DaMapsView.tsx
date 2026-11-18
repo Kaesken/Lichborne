@@ -13,7 +13,7 @@
 import { useState, useRef, useEffect, useMemo, useCallback, type CSSProperties } from 'react'
 import type { LichRoom } from './mapTypes'
 import { COLOR_LEGEND } from './mapTypes'
-import { loadDaWorld, hydrateArea, DA_ROOM_SIZE, type DaWorld } from './damaps/damapsWorld'
+import { loadDaWorld, hydrateArea, loadManaSeed, DA_ROOM_SIZE, type DaWorld, type DaManaSeed } from './damaps/damapsWorld'
 import { lichTitle } from './mapTypes'
 import { scopedKey } from '../../characterScope'
 import {
@@ -366,6 +366,8 @@ function DaMapsCanvas({ world: daWorld, lichDb, currentRoom, character, onSendCo
 
   // Observations (mana / forage) — re-read when the capture records something.
   const [obs, setObs] = useState<DaObservations>(() => loadObservations())
+  const [seed, setSeed] = useState<DaManaSeed | null>(null)
+  useEffect(() => { let live = true; loadManaSeed().then(s => { if (live) setSeed(s) }); return () => { live = false } }, [])
   useEffect(() => {
     const h = () => setObs({ ...loadObservations() })
     document.addEventListener(DA_OBS_EVENT, h)
@@ -644,7 +646,8 @@ function DaMapsCanvas({ world: daWorld, lichDb, currentRoom, character, onSendCo
         </>
       )
     }
-    const mana = obs.mana[r.lich] ?? {}
+    // the shared mana map, with your own readings on top
+    const mana = { ...(seed?.rooms[r.lich] ?? {}), ...(obs.mana[r.lich] ?? {}) }
     const found = obs.forage[r.lich] ?? {}
     const foundItems = Object.entries(found).sort((a, b) => b[1].n - a[1].n)
     const lichForage = r.forage.filter(f => !found[f.toLowerCase()])
@@ -665,7 +668,7 @@ function DaMapsCanvas({ world: daWorld, lichDb, currentRoom, character, onSendCo
           const mine = realm === myRealm
           const pct = m && m.rank >= 0 ? ((m.rank + 1) / MANA_WORDS.length) * 100 : 0
           return (
-            <div key={realm} title={m ? `${m.text}\n(${new Date(m.at).toLocaleString()}${m.near ? ', from a PERCEIVE in the next room' : ''})` : 'No PERCEIVE reading recorded here yet'}
+            <div key={realm} title={m ? `${m.text}\n(${m.shared ? `shared map, ${new Date(m.at).toLocaleDateString()}` : new Date(m.at).toLocaleString()}${m.near ? ', from a PERCEIVE in the next room' : ''})` : 'No PERCEIVE reading recorded here yet'}
               style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 3,
                 color: mine ? 'var(--map-current-color, #e0a050)' : undefined }}>
               <span style={{ width: 72, flexShrink: 0, fontWeight: mine ? 'bold' : undefined }}>{mine ? '▸ ' : ''}{realm}</span>
