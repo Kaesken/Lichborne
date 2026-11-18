@@ -67,6 +67,8 @@ function Bubble({ s, realm, big, label }: {
   )
 }
 
+const DIAMOND = ['top', 'right', 'bottom', 'left']
+
 const MOONS = [['katamba', 'Katamba'], ['yavash', 'Yavash'], ['xibar', 'Xibar']] as const
 
 function fmtMin(m: number): string {
@@ -103,9 +105,13 @@ function ManaExperience({ mana, moons, guild, hidden }: ExperienceProps) {
             <span className="mx-at">{new Date(mana.at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</span>
           </div>
         )}
-        <div className="mx-books">
-          {mana.books.map(b => (
-            <Bubble key={b.book} s={b} realm="Lunar" label={b.book} />
+        {/* up to four books sit in a diamond, clockwise from the top in the
+            order the game listed them (Kaesken); more than four wrap in rows */}
+        <div className={`mx-books${mana.books.length <= 4 ? ' mx-books--diamond' : ''}`}>
+          {mana.books.map((b, i) => (
+            <div key={b.book} className={`mx-slot mx-slot--${DIAMOND[i] ?? 'row'}`}>
+              <Bubble s={b} realm="Lunar" label={b.book} />
+            </div>
           ))}
         </div>
         <MoonStrip moons={moons} />

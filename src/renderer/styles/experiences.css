@@ -3120,6 +3120,18 @@
 /* every book cell the same width and top-aligned, so the bubbles line up
    whether the book's name takes one line or two */
 .mx-books .mx-cell { width: 6.5em; justify-content: flex-start; }
+.mx-books--diamond {
+  display: grid;
+  grid-template-columns: repeat(3, 6.5em);
+  grid-template-rows: repeat(3, 6.3em);
+  gap: 0;
+  place-content: center;
+}
+.mx-slot { display: flex; justify-content: center; }
+.mx-books--diamond .mx-slot--top    { grid-area: 1 / 2; }
+.mx-books--diamond .mx-slot--right  { grid-area: 2 / 3; }
+.mx-books--diamond .mx-slot--bottom { grid-area: 3 / 2; }
+.mx-books--diamond .mx-slot--left   { grid-area: 2 / 1; }
 .mx-books .mx-dir { max-width: 6.5em; text-align: center; line-height: 1.15; }
 .mx-moons { display: flex; flex-wrap: wrap; justify-content: center; gap: 0.25em 1em; padding: 0.35em 0.75em 0.5em; font-size: 0.82em; color: var(--experience-scene-muted); border-top: 1px solid color-mix(in srgb, var(--text-primary) 10%, transparent); }
 .mx-moon b { font-weight: var(--ui-bold-weight, 600); }
