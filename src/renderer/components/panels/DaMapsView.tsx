@@ -19,7 +19,7 @@ import { scopedKey } from '../../characterScope'
 import {
   DA_MAPS_NAME, DA_ARC_COLOR, DA_CATEGORIES, DA_OBS_EVENT, ROOM_REALMS, MANA_WORDS,
   LABEL_FONT, CHAR_W, guildRealm, loadObservations, PROVINCE_ORDER,
-  type DaArea, type DaRoom, type DaArcCategory, type Realm, type DaObservations,
+  type DaArea, type DaRoom, type DaArcCategory, type Realm, type DaObservations, type ManaReading,
 } from './damaps/daMapsData'
 
 interface Props {
@@ -140,6 +140,21 @@ const sectionHead: CSSProperties = {
   marginTop: 8, marginBottom: 4,
 }
 const muted: CSSProperties = { color: 'var(--map-text-muted, #888)' }
+
+/** A Da'Maps square's own code, for a room Lich hasn't mapped: "g:1@0#123".
+ *  Mana logged by hand for such a room uses this code instead of a Lich ID. */
+export function squareCode(areaKey: string, id: number): string {
+  return `${areaKey}#${id}`
+}
+
+/** Black or white, whichever reads better on a square's fill colour. */
+function inkOn(fill: string): string {
+  const m = /^#?([0-9a-f]{6})$/i.exec(fill)
+  if (!m) return 'var(--map-text, #ddd)'
+  const n = parseInt(m[1], 16)
+  const lum = 0.299 * (n >> 16) + 0.587 * ((n >> 8) & 255) + 0.114 * (n & 255)
+  return lum > 140 ? '#000' : '#fff'
+}
 
 /** "You are here", the same sonar ping as Lichborne's other maps: two rings
  *  expanding half a cycle apart (map-panel.css `.genie-here-ping`, stopped by
@@ -419,6 +434,11 @@ function DaMapsCanvas({ world: daWorld, lichDb, currentRoom, character, onSendCo
             <text x={r.x} y={r.y} fontSize={s + 2} fontWeight="bold" fill="var(--map-arc-special, #ffb74d)"
               textAnchor="middle" dominantBaseline="central" pointerEvents="none">↗</text>
           )}
+          {r.lich === null && !r.stubTo && (
+            // not in Lich's map yet: a "?" so mappers can spot it
+            <text x={r.x} y={r.y + 0.3} fontSize={s} fontWeight="bold" fill={fill ? inkOn(fill) : 'var(--map-text, #ddd)'}
+              textAnchor="middle" dominantBaseline="central" pointerEvents="none">?</text>
+          )}
         </g>
       )
     })
@@ -596,6 +616,26 @@ function DaMapsCanvas({ world: daWorld, lichDb, currentRoom, character, onSendCo
     return (['cardinal', 'go', 'climb'] as DaArcCategory[]).filter(c => s.has(c))
   }, [area])
 
+  function manaRows(mana: Partial<Record<Realm, ManaReading>>) {
+    return ROOM_REALMS.map(realm => {
+      const m = mana[realm]
+      const mine = realm === myRealm
+      const pct = m && m.rank >= 0 ? ((m.rank + 1) / MANA_WORDS.length) * 100 : 0
+      return (
+        <div key={realm} title={m ? `${m.text}${m.near ? '\n(from a PERCEIVE in the next room)' : ''}` : 'This room\'s mana hasn\'t been mapped yet'}
+          style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 3,
+            color: mine ? 'var(--map-current-color, #e0a050)' : undefined }}>
+          <span style={{ width: 72, flexShrink: 0, fontWeight: mine ? 'bold' : undefined }}>{mine ? '▸ ' : ''}{realm}</span>
+          <span style={{ flex: 1, height: 6, background: 'var(--map-btn-bg, #222)', borderRadius: 2, overflow: 'hidden' }}>
+            <span style={{ display: 'block', height: 6, width: `${pct}%`,
+              background: mine ? 'var(--map-current-color, #e0a050)' : 'var(--map-text-muted, #777)' }} />
+          </span>
+          <span style={{ minWidth: 70, textAlign: 'right', whiteSpace: 'nowrap', ...(m ? {} : muted) }}>{m ? m.word : 'not mapped'}</span>
+        </div>
+      )
+    })
+  }
+
   function roomDetails(r: DaRoom) {
     if (r.stubTo) {
       const to = src.area(r.stubTo)
@@ -610,17 +650,25 @@ function DaMapsCanvas({ world: daWorld, lichDb, currentRoom, character, onSendCo
         </>
       )
     }
+    const code = area ? squareCode(area.image, r.id) : ''
     if (r.lich === null) {
       return (
         <>
           <div style={{ fontWeight: 'bold' }}>{r.title || '(unnamed room)'}</div>
           <div style={{ ...muted, marginTop: 6 }}>
-            Not linked to a Lich room yet, so it has no details and go2 can't take you there.
+            Not in Lich's map yet, so go2 can't take you there.
           </div>
+          <div style={{ marginTop: 6 }}>
+            <span style={muted}>Square code: </span><code>{code}</code>{' '}
+            <button className="map-btn" title="Copy the square code (use it to log this room's mana by hand)"
+              onClick={() => window.api.writeClipboard(code)}>Copy</button>
+          </div>
+          <div style={sectionHead}>Mana</div>
+          {manaRows(seed?.rooms[code] ?? {})}
         </>
       )
     }
-    const mana = seed?.rooms[r.lich] ?? {}
+    const mana = seed?.rooms[r.lich] ?? seed?.rooms[code] ?? {}
     const found = obs.forage[r.lich] ?? {}
     const foundItems = Object.entries(found).sort((a, b) => b[1].n - a[1].n)
     const lichForage = r.forage.filter(f => !found[f.toLowerCase()])
@@ -636,23 +684,7 @@ function DaMapsCanvas({ world: daWorld, lichDb, currentRoom, character, onSendCo
         {myRealm === 'Lunar' && (
           <div style={{ ...muted, marginBottom: 4 }}>Lunar mana follows the moons, not the room.</div>
         )}
-        {ROOM_REALMS.map(realm => {
-          const m = mana[realm]
-          const mine = realm === myRealm
-          const pct = m && m.rank >= 0 ? ((m.rank + 1) / MANA_WORDS.length) * 100 : 0
-          return (
-            <div key={realm} title={m ? `${m.text}${m.near ? '\n(from a PERCEIVE in the next room)' : ''}` : 'This room\'s mana hasn\'t been mapped yet'}
-              style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 3,
-                color: mine ? 'var(--map-current-color, #e0a050)' : undefined }}>
-              <span style={{ width: 72, flexShrink: 0, fontWeight: mine ? 'bold' : undefined }}>{mine ? '▸ ' : ''}{realm}</span>
-              <span style={{ flex: 1, height: 6, background: 'var(--map-btn-bg, #222)', borderRadius: 2, overflow: 'hidden' }}>
-                <span style={{ display: 'block', height: 6, width: `${pct}%`,
-                  background: mine ? 'var(--map-current-color, #e0a050)' : 'var(--map-text-muted, #777)' }} />
-              </span>
-              <span style={{ minWidth: 70, textAlign: 'right', whiteSpace: 'nowrap', ...(m ? {} : muted) }}>{m ? m.word : 'not mapped'}</span>
-            </div>
-          )
-        })}
+        {manaRows(mana)}
 
         <div style={sectionHead}>Forage</div>
         {foundItems.length === 0 && lichForage.length === 0 && <div style={muted}>Nothing known yet</div>}
@@ -818,6 +850,13 @@ function DaMapsCanvas({ world: daWorld, lichDb, currentRoom, character, onSendCo
                       <rect x={1} y={1} width={12} height={12} rx={2} fill="none" stroke="var(--map-node-stroke, #555)" strokeDasharray="3 2" />
                     </svg>
                     <span style={muted}>Building (indoor rooms)</span>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, marginBottom: 3 }}>
+                    <svg width={14} height={14} style={{ flexShrink: 0, alignSelf: 'center' }}>
+                      <rect x={1} y={1} width={12} height={12} fill="var(--map-node-fill, #2a2a2a)" stroke="var(--map-node-stroke, #555)" strokeDasharray="1.5 1.5" />
+                      <text x={7} y={7.5} fontSize={10} fontWeight="bold" fill="var(--map-text, #ddd)" textAnchor="middle" dominantBaseline="central">?</text>
+                    </svg>
+                    <span style={muted}>Not in Lich's map yet (no go2)</span>
                   </div>
                   <div style={{ ...muted, marginTop: 8 }}>Right-click any room to <code>;go2</code> there.</div>
                 </>
