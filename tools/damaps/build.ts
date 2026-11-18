@@ -58,6 +58,13 @@ for (const [lid, nodes] of match.nodesOf) {
   if (n) keysOf.set(lid, genieAreaKey(zoneId, n.z))
 }
 
+const LABEL_REACH = 200
+function nearRooms(rooms: { x: number; y: number }[], x: number, y: number): boolean {
+  let x1 = Infinity, y1 = Infinity, x2 = -Infinity, y2 = -Infinity
+  for (const r of rooms) { x1 = Math.min(x1, r.x); y1 = Math.min(y1, r.y); x2 = Math.max(x2, r.x); y2 = Math.max(y2, r.y) }
+  return x >= x1 - LABEL_REACH && x <= x2 + LABEL_REACH && y >= y1 - LABEL_REACH && y <= y2 + LABEL_REACH
+}
+
 // ── Areas ────────────────────────────────────────────────────────────────────
 const areas: DaWorldArea[] = []
 let squares = 0, matched = 0, lone = 0
@@ -79,7 +86,8 @@ for (const zone of merged.zones.values()) {
       floors,
       rooms: a.rooms.map((r): DaWorldRoom => [r.id, r.lich ?? 0, r1(r.x), r1(r.y), r.fill ?? '', r.stubTo ?? '', r.title, r.goTo ?? 0]),
       lines: a.arcs.map(x => [x.a, x.b, x.cat === 'cardinal' ? 0 : x.cat === 'climb' ? 1 : 2]),
-      texts: (a.texts ?? []).map(t => [t.text, t.x, t.y]),
+      // a place name far outside the map (a stray label in the source) is dropped
+      texts: (a.texts ?? []).filter(t => nearRooms(a.rooms, t.x, t.y)).map(t => [t.text, t.x, t.y]),
       buildings: a.buildings.map(b => [b.name, r1(b.x1), r1(b.y1), r1(b.x2), r1(b.y2), b.rooms, b.outline ? 1 : 0]),
     })
   }
