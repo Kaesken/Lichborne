@@ -231,6 +231,10 @@ contextBridge.exposeInMainWorld('api', {
   // Surfaced in Help → About so it is answerable without a round-trip.
   arch: process.arch,
   isAppImage: !!process.env.APPIMAGE,
+  // Da'Maps mapper tools (square codes on rooms Lich hasn't mapped), for the
+  // people collecting mana readings. Only a launcher that sets
+  // LICHBORNE_DAMAPS_DEV=1 turns them on; players never see them.
+  damapsDev: process.env.LICHBORNE_DAMAPS_DEV === '1',
 
   // Window zoom (v0.20.4) — Chromium's page zoom, the same thing Ctrl+=/−/0
   // drive through the View menu's zoom roles. It is NOT the game font: it

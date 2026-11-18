@@ -101,6 +101,7 @@ declare global {
       platform: string
       arch: string
       isAppImage: boolean
+      damapsDev: boolean
       getZoomLevel: () => number
       setZoomLevel: (level: number) => void
       secureStorageAvailable: () => Promise<boolean>

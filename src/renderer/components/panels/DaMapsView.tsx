@@ -658,11 +658,14 @@ function DaMapsCanvas({ world: daWorld, lichDb, currentRoom, character, onSendCo
           <div style={{ ...muted, marginTop: 6 }}>
             Not in Lich's map yet, so go2 can't take you there.
           </div>
-          <div style={{ marginTop: 6 }}>
-            <span style={muted}>Square code: </span><code>{code}</code>{' '}
-            <button className="map-btn" title="Copy the square code (use it to log this room's mana by hand)"
-              onClick={() => window.api.writeClipboard(code)}>Copy</button>
-          </div>
+          {window.api.damapsDev && (
+            // mapper tools only (LICHBORNE_DAMAPS_DEV=1): the code a hand-written mana reading uses
+            <div style={{ marginTop: 6 }}>
+              <span style={muted}>Square code: </span><code>{code}</code>{' '}
+              <button className="map-btn" title="Copy the square code (use it to log this room's mana by hand)"
+                onClick={() => window.api.writeClipboard(code)}>Copy</button>
+            </div>
+          )}
           <div style={sectionHead}>Mana</div>
           {manaRows(seed?.rooms[code] ?? {})}
         </>
