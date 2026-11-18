@@ -139,16 +139,17 @@ export function hydrateArea(a: DaWorldArea, lichDb: Map<number, LichRoom>): DaAr
   return { image: a.key, name: a.name, rooms, byId, byLich, arcs, buildings, bbox, texts }
 }
 
-// ── The shared mana map ──────────────────────────────────────────────────────
+// ── Mana readings built into Da'Maps ─────────────────────────────────────────
 //
 // public/damaps-mana-seed.json, built by tools/damaps/build-mana-seed.mjs from
 // damaps-mana.log files: one reading per room and realm, shipped so every
-// player sees mana without perceiving first. A player's own readings are kept
-// separately and always win where both exist (DaMapsView combines them).
+// player sees mana without perceiving first. A room's mana doesn't change, and
+// these come from full-scale (21-step) readings, so they win over a player's
+// own; a player's readings only fill rooms these don't cover.
 
 export interface DaManaSeed {
   made: string
-  /** Lich room id → realm → reading */
+  /** Lich room id → realm → reading (built into Da'Maps) */
   rooms: Record<string, Partial<Record<Realm, ManaReading>>>
 }
 
@@ -165,7 +166,7 @@ export function loadManaSeed(): Promise<DaManaSeed | null> {
         for (const [realm, [lv, near]] of Object.entries(realms)) {
           if (!(lv >= 1 && lv <= f.words.length)) continue
           out[realm as Realm] = { word: f.words[lv - 1], rank: lv - 1, at, near: !!near, shared: true,
-            text: 'From the shared Da\'Maps mana map' }
+            text: 'Read by the Da\'Maps mana tour' }
         }
         rooms[id] = out
       }

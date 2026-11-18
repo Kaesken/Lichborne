@@ -1,5 +1,5 @@
 // build-mana-seed — turn damaps-mana.log files (from the damaps-mana.lic Lich
-// script) into Da'Maps' shared mana map, src/renderer/public/damaps-mana-seed.json.
+// script) into the mana readings built into Da'Maps, src/renderer/public/damaps-mana-seed.json.
 //
 //   node tools/damaps/build-mana-seed.mjs <damaps-mana.log> [more logs...]
 //
@@ -45,4 +45,4 @@ for (const [id, realms] of Object.entries(best)) {
 const out = path.join(path.dirname(fileURLToPath(import.meta.url)), '../../src/renderer/public/damaps-mana-seed.json')
 const made = new Date().toISOString().slice(0, 10)
 fs.writeFileSync(out, JSON.stringify({ version: 1, made, words: WORDS, rooms }))
-console.log(`shared mana map: ${Object.keys(rooms).length} rooms from ${logs.length} log(s) (${lines} readings used) -> ${out}`)
+console.log(`built-in mana: ${Object.keys(rooms).length} rooms from ${logs.length} log(s) (${lines} readings used) -> ${out}`)

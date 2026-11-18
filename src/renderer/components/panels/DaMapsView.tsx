@@ -646,8 +646,8 @@ function DaMapsCanvas({ world: daWorld, lichDb, currentRoom, character, onSendCo
         </>
       )
     }
-    // the shared mana map, with your own readings on top
-    const mana = { ...(seed?.rooms[r.lich] ?? {}), ...(obs.mana[r.lich] ?? {}) }
+    // the readings built into Da'Maps win; your own fill in rooms they don't cover
+    const mana = { ...(obs.mana[r.lich] ?? {}), ...(seed?.rooms[r.lich] ?? {}) }
     const found = obs.forage[r.lich] ?? {}
     const foundItems = Object.entries(found).sort((a, b) => b[1].n - a[1].n)
     const lichForage = r.forage.filter(f => !found[f.toLowerCase()])
@@ -668,7 +668,7 @@ function DaMapsCanvas({ world: daWorld, lichDb, currentRoom, character, onSendCo
           const mine = realm === myRealm
           const pct = m && m.rank >= 0 ? ((m.rank + 1) / MANA_WORDS.length) * 100 : 0
           return (
-            <div key={realm} title={m ? `${m.text}\n(${m.shared ? `shared map, ${new Date(m.at).toLocaleDateString()}` : new Date(m.at).toLocaleString()}${m.near ? ', from a PERCEIVE in the next room' : ''})` : 'No PERCEIVE reading recorded here yet'}
+            <div key={realm} title={m ? `${m.text}\n(${m.shared ? `built into Da'Maps` : new Date(m.at).toLocaleString()}${m.near ? ', from a PERCEIVE in the next room' : ''})` : 'No PERCEIVE reading recorded here yet'}
               style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 3,
                 color: mine ? 'var(--map-current-color, #e0a050)' : undefined }}>
               <span style={{ width: 72, flexShrink: 0, fontWeight: mine ? 'bold' : undefined }}>{mine ? '▸ ' : ''}{realm}</span>
