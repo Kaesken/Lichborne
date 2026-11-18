@@ -225,7 +225,7 @@ export function splitTags(tags: string[] | undefined): { forage: string[]; hunti
 // ── Observations: mana + forage seen by players (local store) ─────────────────
 
 /** `near`: reported by PERCEIVE in a neighbouring room, not taken in the room itself.
- *  `shared`: from the shared mana map shipped with Da'Maps, not your own reading. */
+ *  `shared`: a reading built into Da'Maps (the mana tour), not your own. */
 export interface ManaReading { word: string; rank: number; text: string; at: number; near?: boolean; shared?: boolean }
 export interface ForageFind  { n: number; at: number }
 export interface DaObservations {
