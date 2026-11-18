@@ -13,7 +13,7 @@
 import { useState, useRef, useEffect, useMemo, useCallback, type CSSProperties } from 'react'
 import type { LichRoom } from './mapTypes'
 import { COLOR_LEGEND } from './mapTypes'
-import { loadDaWorld, hydrateArea, type DaWorld } from './damaps/damapsWorld'
+import { loadDaWorld, hydrateArea, DA_ROOM_SIZE, type DaWorld } from './damaps/damapsWorld'
 import { lichTitle } from './mapTypes'
 import { scopedKey } from '../../characterScope'
 import {
@@ -140,6 +140,22 @@ const sectionHead: CSSProperties = {
   marginTop: 8, marginBottom: 4,
 }
 const muted: CSSProperties = { color: 'var(--map-text-muted, #888)' }
+
+/** "You are here", the same sonar ping as Lichborne's other maps: two rings
+ *  expanding half a cycle apart (map-panel.css `.genie-here-ping`, stopped by
+ *  epilepsy-safe mode) over a solid ring on the square. */
+function HerePing({ x, y, size }: { x: number; y: number; size: number }) {
+  const ping = size * 1.3125, solid = size * 0.5
+  const c = 'var(--map-current-color, #4caf50)'
+  return (
+    <g pointerEvents="none" style={{ transform: `translate(${x}px, ${y}px)` }}>
+      <circle className="genie-here-ping" r={ping} fill="none" stroke={c} strokeWidth={2.5} vectorEffect="non-scaling-stroke" />
+      <circle className="genie-here-ping genie-here-ping--delayed" r={ping} fill="none" stroke={c} strokeWidth={2.5} vectorEffect="non-scaling-stroke" />
+      <circle r={solid} fill="none" stroke="rgba(0,0,0,0.55)" strokeWidth={3} vectorEffect="non-scaling-stroke" />
+      <circle r={solid} fill="none" stroke={c} strokeWidth={2} vectorEffect="non-scaling-stroke" />
+    </g>
+  )
+}
 
 export default function DaMapsView({ lichDb, currentRoom, character, onSendCommand }: Props) {
   // Da'Maps' own map, loaded once (a separate chunk).
@@ -433,6 +449,40 @@ function DaMapsCanvas({ world: daWorld, lichDb, currentRoom, character, onSendCo
       ))]
   }, [area, showIndoor])
 
+  // Route preview, as in Genie Maps: the shortest walk along the drawn lines
+  // from your square to the one under the pointer (green), or to the pinned
+  // one (gold). Only inside the map you're on.
+  const neighbours = useMemo(() => {
+    const m = new Map<number, number[]>()
+    for (const a of area?.arcs ?? []) {
+      if (!m.has(a.a)) m.set(a.a, [])
+      if (!m.has(a.b)) m.set(a.b, [])
+      m.get(a.a)!.push(a.b); m.get(a.b)!.push(a.a)
+    }
+    return m
+  }, [area])
+  const routeTo = useCallback((to: number | null): string => {
+    if (!area || !hereRoom || to === null || to === hereRoom.id) return ''
+    const prev = new Map<number, number>([[hereRoom.id, hereRoom.id]])
+    const queue = [hereRoom.id]
+    for (let i = 0; i < queue.length && !prev.has(to); i++) {
+      for (const n of neighbours.get(queue[i]) ?? []) if (!prev.has(n)) { prev.set(n, queue[i]); queue.push(n) }
+    }
+    if (!prev.has(to)) return ''
+    let d = ''
+    for (let id = to; id !== hereRoom.id; id = prev.get(id)!) {
+      const a = area.byId.get(id)!, b = area.byId.get(prev.get(id)!)!
+      d += `M${a.x},${a.y}L${b.x},${b.y}`
+    }
+    return d
+  }, [area, hereRoom, neighbours])
+  const hoverRoute = useMemo(() => routeTo(hoverId), [routeTo, hoverId])
+  const pinnedRoute = useMemo(() => routeTo(pinnedId), [routeTo, pinnedId])
+  const routePath = (d: string, stroke: string) => d && (
+    <path d={d} stroke={stroke} strokeWidth={2.5} fill="none" opacity={0.85}
+      vectorEffect="non-scaling-stroke" pointerEvents="none" strokeLinecap="round" strokeLinejoin="round" />
+  )
+
   const highlight = (id: number | null, stroke: string) => {
     if (!area || id === null) return null
     const r = area.byId.get(id)
@@ -497,9 +547,8 @@ function DaMapsCanvas({ world: daWorld, lichDb, currentRoom, character, onSendCo
     return (
       <g pointerEvents="none">
         <rect x={wa.x + 4} y={wa.y + 4} width={G_CELL - 8} height={G_CELL - 8} rx={6} fill="none"
-          stroke="var(--map-current-color, #2fd08a)" strokeWidth={2} vectorEffect="non-scaling-stroke" />
-        <circle cx={cx} cy={cy} r={9} fill="none" stroke="var(--map-current-color, #2fd08a)" strokeWidth={2} vectorEffect="non-scaling-stroke" />
-        <circle cx={cx} cy={cy} r={3} fill="var(--map-current-color, #2fd08a)" />
+          stroke="var(--map-current-color, #4caf50)" strokeWidth={2} vectorEffect="non-scaling-stroke" />
+        <HerePing x={cx} y={cy} size={Math.max(6, DA_ROOM_SIZE * wa.s)} />
       </g>
     )
   })()
@@ -517,16 +566,9 @@ function DaMapsCanvas({ world: daWorld, lichDb, currentRoom, character, onSendCo
       {!showIndoor && hereRoom.indoor && hereRoom.building !== null && (() => {
         const b = area!.buildings[hereRoom.building!]
         return <rect x={b.x1} y={b.y1} width={b.x2 - b.x1} height={b.y2 - b.y1} fill="none"
-          stroke="var(--map-current-color, #2fd08a)" strokeWidth={1.5} vectorEffect="non-scaling-stroke" />
+          stroke="var(--map-current-color, #4caf50)" strokeWidth={1.5} vectorEffect="non-scaling-stroke" />
       })()}
-      <circle cx={hereRoom.x} cy={hereRoom.y} r={14} fill="none" stroke="var(--map-current-color, #2fd08a)"
-        strokeWidth={1.5} vectorEffect="non-scaling-stroke">
-        <animate attributeName="r" values="8;22;8" dur="2.4s" repeatCount="indefinite" />
-        <animate attributeName="opacity" values="0.9;0.15;0.9" dur="2.4s" repeatCount="indefinite" />
-      </circle>
-      <circle cx={hereRoom.x} cy={hereRoom.y} r={6} fill="none" stroke="var(--map-current-color, #2fd08a)"
-        strokeWidth={2} vectorEffect="non-scaling-stroke" />
-      <circle cx={hereRoom.x} cy={hereRoom.y} r={2} fill="var(--map-current-color, #2fd08a)" />
+      <HerePing x={hereRoom.x} y={hereRoom.y} size={hereRoom.size} />
     </g>
   )
 
@@ -741,6 +783,8 @@ function DaMapsCanvas({ world: daWorld, lichDb, currentRoom, character, onSendCo
                 {buildingShapes}
                 {labels}
                 {roomRects}
+                {routePath(pinnedRoute, 'var(--accent, gold)')}
+                {routePath(hoverRoute, 'var(--map-current-color, #4caf50)')}
                 {highlight(pinnedId, 'var(--map-select-color, #e0a050)')}
                 {highlight(hoverId, 'var(--map-text, #eee)')}
                 {hereIndicator}
