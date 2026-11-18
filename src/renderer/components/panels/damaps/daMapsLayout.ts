@@ -464,6 +464,9 @@ export function buildLayout(lichDb: Map<number, LichRoom>, imageIndex: Map<strin
   // 4. Islands that never connect to a positioned room.
   for (const r of lichDb.values()) {
     if (out.areaOf.has(r.id)) continue
+    // A room with no exit in or out at all (Lich can't reach it either) would
+    // be a lone square on a map of its own; leave it off.
+    if (!links.get(r.id)?.length) continue
     const area = UNMAPPED_PREFIX + ((r.location ?? '').trim() || 'Unmapped')
     if (!grids.has(area)) { grids.set(area, new Grid()); out.imageIndex.set(area, []) }
     const [ox, oy] = belowEverything(area, [[0, 0]])

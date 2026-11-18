@@ -320,6 +320,7 @@ export function buildArea(
   const MAX_ARC = layout ? 650 : 260
   const seen = new Set<string>()
   const arcs: DaArc[] = []
+  const longArcs: DaArc[] = []   // too long to draw normally; kept for rooms with no other line
   for (const r of rooms) {
     const a = byId.get(r.id)
     if (!a) continue
@@ -329,7 +330,7 @@ export function buildArea(
       const key = a.id < b.id ? `${a.id}-${b.id}` : `${b.id}-${a.id}`
       if (seen.has(key)) continue
       seen.add(key)
-      if (Math.hypot(a.x - b.x, a.y - b.y) > MAX_ARC) continue
+      if (Math.hypot(a.x - b.x, a.y - b.y) > MAX_ARC) { longArcs.push({ a: a.id, b: b.id, cat: classifyMove(typeof move === 'string' ? move : '') }); continue }
       arcs.push({ a: a.id, b: b.id, cat: classifyMove(typeof move === 'string' ? move : '') })
     }
   }
@@ -410,6 +411,58 @@ export function buildArea(
     return straight(move, p, q) || straight(back, q, p)
   }) : arcs
   const visibleArcs = dropArcsThroughRooms(tidyArcs, placed, byId)
+
+  // Every room keeps a line. A room whose lines were all left out above gets
+  // its shortest one back; a room whose exits all leave this area gets a
+  // small ↗ marker beside it, joined by a short line (click it to go there).
+  const degree = new Map<number, number>()
+  const bump = (id: number) => degree.set(id, (degree.get(id) ?? 0) + 1)
+  for (const a of visibleArcs) { bump(a.a); bump(a.b) }
+  let nextMarker = -1
+  for (const room of [...placed]) {
+    if (degree.get(room.id)) continue
+    let own = arcs.concat(longArcs).filter(a => a.a === room.id || a.b === room.id)
+    if (!own.length) {
+      // exits that only lead IN to this room (it lists none of its own)
+      for (const from of incomingOf(lichDb).get(room.id) ?? []) {
+        if (byId.has(from) && from !== room.id) own.push({ a: from, b: room.id, cat: classifyMove(String(lichDb.get(from)?.wayto?.[String(room.id)] ?? '')) })
+      }
+    }
+    if (own.length) {
+      const len = (a: DaArc) => { const p = byId.get(a.a)!, q = byId.get(a.b)!; return Math.hypot(p.x - q.x, p.y - q.y) }
+      const best = own.sort((a, b) => len(a) - len(b))[0]
+      visibleArcs.push(best); bump(best.a); bump(best.b)
+      continue
+    }
+    let to = room.crossTo[0]
+    if (!to && layout) for (const from of incomingOf(lichDb).get(room.id) ?? []) {
+      const k = layout.areaOf.get(from)
+      if (k && k !== image) { to = k; break }
+    }
+    if (!to) {
+      // Lich knows no exit into or out of this room at all: join it to the
+      // nearest room of the same building, else the nearest room.
+      const others = placed.filter(o => o.id !== room.id && !o.stubTo)
+      const d = (o: DaRoom) => Math.hypot(o.x - room.x, o.y - room.y)
+      const same = others.filter(o => buildingName(o.title) === buildingName(room.title)).sort((x, y) => d(x) - d(y))[0]
+      const any = others.sort((x, y) => d(x) - d(y))[0]
+      const t = same && d(same) <= (any ? d(any) * 4 : Infinity) ? same : any
+      if (t) { visibleArcs.push({ a: room.id, b: t.id, cat: 'go' }); bump(room.id); bump(t.id) }
+      continue
+    }
+    const step = room.size * 1.8
+    const free = (x: number, y: number) => !placed.some(o => Math.abs(o.x - x) < o.size && Math.abs(o.y - y) < o.size)
+    const spot = ([[step, 0], [0, -step], [-step, 0], [0, step], [step, -step], [-step, -step], [-step, step], [step, step]] as [number, number][])
+      .find(([dx, dy]) => free(room.x + dx, room.y + dy)) ?? [step, 0]
+    const m: DaRoom = {
+      id: nextMarker--, lich: null, stubTo: to,
+      x: room.x + spot[0], y: room.y + spot[1], size: room.size,
+      lx: 0, ly: 0, title: areaDisplayName(to), indoor: false, category: null,
+      forage: [], hunting: [], services: [], exits: [], crossTo: [to], label: '', building: null, location: '',
+    }
+    placed.push(m); byId.set(m.id, m)
+    visibleArcs.push({ a: room.id, b: m.id, cat: 'go' }); bump(room.id); bump(m.id)
+  }
   placeLabelsAndOutlines(placed, buildings, visibleArcs, byId)
 
   const bbox = placed.length
@@ -420,6 +473,22 @@ export function buildArea(
     : { x1: 0, y1: 0, x2: 100, y2: 100 }
 
   return { image, name: areaDisplayName(image), rooms: placed, byId, byLich: byId, arcs: visibleArcs, buildings, bbox }
+}
+
+/** room id → rooms whose exits lead to it (built once per map database) */
+const incomingCache = new WeakMap<Map<number, LichRoom>, Map<number, number[]>>()
+function incomingOf(lichDb: Map<number, LichRoom>): Map<number, number[]> {
+  let m = incomingCache.get(lichDb)
+  if (!m) {
+    m = new Map()
+    for (const r of lichDb.values()) for (const k of Object.keys(r.wayto ?? {})) {
+      const t = Number(k)
+      if (!m.has(t)) m.set(t, [])
+      m.get(t)!.push(r.id)
+    }
+    incomingCache.set(lichDb, m)
+  }
+  return m
 }
 
 // ── Observations: mana + forage seen by players (local store) ─────────────────
