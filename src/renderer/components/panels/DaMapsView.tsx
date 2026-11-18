@@ -346,14 +346,11 @@ function DaMapsCanvas({ world: daWorld, lichDb, currentRoom, character, onSendCo
     return () => document.removeEventListener(DA_OBS_EVENT, h)
   }, [])
 
-  // The character's realm: detected guild first, else the panel's own picker.
-  const [pickedRealm, setPickedRealm] = useState<Realm | ''>(() => {
-    try { return (localStorage.getItem(scopedKey(character, 'damapsRealm')) as Realm | null) ?? '' } catch { return '' }
-  })
-  const detectedRealm = useMemo(() => {
+  // The character's realm, from its guild once Lichborne has seen it (INFO);
+  // that realm is marked in the mana list.
+  const myRealm: Realm | null = useMemo(() => {
     try { return guildRealm(localStorage.getItem(scopedKey(character, 'detectedGuild'))) } catch { return null }
   }, [character])
-  const myRealm: Realm | null = detectedRealm ?? (pickedRealm || null)
 
   // ── Drawing ────────────────────────────────────────────────────────────────
   const arcPaths = useMemo(() => {
@@ -636,20 +633,6 @@ function DaMapsCanvas({ world: daWorld, lichDb, currentRoom, character, onSendCo
         <div style={sectionHead}>Mana</div>
         {myRealm === 'Lunar' && (
           <div style={{ ...muted, marginBottom: 4 }}>Lunar mana follows the moons, not the room.</div>
-        )}
-        {!detectedRealm && (
-          <div style={{ marginBottom: 4 }}>
-            <span style={muted}>Your realm: </span>
-            <select className="map-select" value={pickedRealm} aria-label="Your mana realm"
-              onChange={e => {
-                const v = e.target.value as Realm | ''
-                setPickedRealm(v)
-                try { localStorage.setItem(scopedKey(character, 'damapsRealm'), v) } catch { /* ignore */ }
-              }}>
-              <option value="">—</option>
-              {(['Life', 'Holy', 'Elemental', 'Arcane', 'Lunar'] as Realm[]).map(x => <option key={x} value={x}>{x}</option>)}
-            </select>
-          </div>
         )}
         {ROOM_REALMS.map(realm => {
           const m = mana[realm]
