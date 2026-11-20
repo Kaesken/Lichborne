@@ -55,6 +55,8 @@ interface MapSource {
   /** the area to show for a Lich room; `prefer` keeps the map you're on when the room is on two */
   areaOf(lichId: number, prefer?: string): string
   province(key: string): string
+  /** rooms on a map, from the file (no hydration) */
+  roomCount(key: string): number
   /** the floors of this area's map, ground floor first */
   floors(key: string): string[]
   stats: { squares: number; matched: number }
@@ -81,6 +83,7 @@ function worldSource(w: DaWorld, lichDb: Map<number, LichRoom>): MapSource {
       return (prefer && keys.find(k => zoneOf(k) === zoneOf(prefer))) || keys[0] || ''
     },
     province: key => w.byKey.get(key)?.province ?? 'Other',
+    roomCount: key => w.byKey.get(key)?.rooms.length ?? 0,
     floors: key => w.byKey.get(key)?.floors ?? [key],
     stats: { squares: w.file.stats.squares, matched: w.file.stats.matched },
   }
@@ -94,12 +97,13 @@ function getSource(world: DaWorld, lichDb: Map<number, LichRoom>): MapSource {
   return src
 }
 
-function buildWorld(src: MapSource): World {
+function buildWorld(src: MapSource, only: string): World {
   const groups = new Map<string, WorldArea[]>()
   for (const image of src.globalKeys) {
     const area = src.area(image)
     if (!area || area.rooms.length === 0) continue
     const province = src.province(image)
+    if (province !== only) continue
     const bw = Math.max(1, area.bbox.x2 - area.bbox.x1), bh = Math.max(1, area.bbox.y2 - area.bbox.y1)
     // capped so a tiny area (1-3 rooms) isn't blown up to fill its cell
     const sc = Math.min(G_THUMB / bw, G_THUMB / bh, 1.5)
@@ -112,7 +116,7 @@ function buildWorld(src: MapSource): World {
   for (const prov of PROVINCE_ORDER) {
     const list = (groups.get(prov) ?? []).sort((a, b) => a.name.localeCompare(b.name))
     if (!list.length) continue
-    heads.push({ name: prov, y: y + 44 })
+    heads.push({ name: prov === 'Other' ? 'Elsewhere' : prov, y: y + 44 })
     y += G_HEAD
     list.forEach((wa, i) => {
       wa.x = (i % G_COLS) * G_CELL
@@ -126,7 +130,8 @@ function buildWorld(src: MapSource): World {
   }
   return { areas, byImage: new Map(areas.map(a => [a.image, a])), heads, w: G_COLS * G_CELL, h: y }
 }
-const worldCache = new WeakMap<MapSource, World>()
+// one World per province, built the first time that province is opened
+const worldCache = new WeakMap<MapSource, Map<string, World>>()
 /** "Zoluren 1 Crossing" → "Crossing": the province heading already says where. */
 function shortAreaName(name: string): string {
   const out = name.replace(/^(zoluren|therengia|ilithi|ilitha|ilithia|forfedhdar|qi|taisidon)\b\s*/i, '')
@@ -188,24 +193,127 @@ export default function DaMapsView({ lichDb, currentRoom, character, onSendComma
   return <DaMapsCanvas world={daWorld} lichDb={lichDb} currentRoom={currentRoom} character={character} onSendCommand={onSendCommand} />
 }
 
+// ── The province map (Global's first view) ──────────────────────────────────
+// A rough sketch of the lands, not to scale: each province is one clickable
+// shape (Kaesken's layout). Hues are fixed per province, mixed with the map's
+// own background and text so they hold on light and dark themes. Maps that
+// belong to no province (events, mazes, transports) are "Elsewhere".
+const PROVINCE_SHAPES: { id: string; hue: string; points: string; lx: number; ly: number }[] = [
+  { id: 'Therengia', hue: '#4f9a5c', lx: 240, ly: 110,
+    points: '0,0 479,0 486,80 464,152 474,247 400,249 289,262 124,237 54,187 0,157' },
+  { id: 'Forfedhdar', hue: '#a8834c', lx: 105, ly: 365,
+    points: '0,157 54,187 124,237 289,262 254,277 219,332 207,402 219,455 184,472 89,522 0,535' },
+  { id: 'Zoluren', hue: '#5277c4', lx: 360, ly: 350,
+    points: '289,262 400,249 474,247 497,272 487,317 504,427 369,437 219,455 207,402 219,332 254,277' },
+  { id: 'Ilithi', hue: '#b0505c', lx: 290, ly: 565,
+    points: '0,535 89,522 184,472 219,455 369,437 504,427 519,477 566,477 534,520 599,520 644,562 627,625 494,639 0,639' },
+  { id: "Qi'Reshalia", hue: '#9a62bd', lx: 612, ly: 320,
+    points: '520,190 640,180 707,215 712,330 690,440 610,465 548,455 512,385 505,280' },
+  { id: 'Taisidon', hue: '#8c8c8c', lx: 688, ly: 576,
+    points: '664,592 700,586 714,610 694,634 664,628' },
+]
+
+export function ProvinceMap({ counts, here, hover, onHover, onOpen, rightInset }: {
+  counts: Map<string, number>; here: string | null; hover: string | null
+  onHover: (p: string | null) => void; onOpen: (p: string) => void; rightInset: number
+}) {
+  const elsewhere = counts.get('Other') ?? 0
+  return (
+    <div style={{ position: 'absolute', top: 0, left: 0, bottom: 0, right: rightInset, background: 'var(--map-bg, #111)' }}
+      onMouseLeave={() => onHover(null)}>
+      <svg viewBox="-24 -24 768 700" preserveAspectRatio="xMidYMid meet" style={{ width: '100%', height: '100%', display: 'block' }}>
+        <text x={612} y={110} fontSize={13} fontStyle="italic" textAnchor="middle" pointerEvents="none"
+          style={{ fill: 'var(--map-text-muted, #888)', fontFamily: 'var(--font-mono, monospace)' }}>Reshal Sea</text>
+        {PROVINCE_SHAPES.map(p => {
+          const n = counts.get(p.id) ?? 0
+          const on = n > 0
+          const hot = on && hover === p.id
+          const isHere = here === p.id
+          return (
+            <g key={p.id} style={{ cursor: on ? 'pointer' : 'default' }}
+              onMouseEnter={() => onHover(on ? p.id : null)}
+              onClick={() => { if (on) onOpen(p.id) }}>
+              <title>{on ? `${p.id}: ${n} map${n === 1 ? '' : 's'}. Click to list them.` : `${p.id}: no maps yet`}</title>
+              <polygon points={p.points} strokeLinejoin="round" style={{
+                fill: `color-mix(in srgb, ${p.hue} ${hot ? 52 : on ? 32 : 12}%, var(--map-bg, #111))`,
+                stroke: `color-mix(in srgb, ${p.hue} ${hot ? 90 : 55}%, var(--map-text, #ddd))`,
+                strokeWidth: hot ? 2.5 : 1.5,
+                transition: 'fill 120ms',
+              }} />
+              {p.id !== 'Taisidon' ? (
+                <>
+                  <text x={p.lx} y={p.ly} fontSize={24} fontWeight="bold" textAnchor="middle" pointerEvents="none"
+                    style={{ fill: 'var(--map-text, #ddd)', fontFamily: 'var(--font-mono, monospace)', letterSpacing: '0.12em' }}>
+                    {p.id.toUpperCase()}</text>
+                  <text x={p.lx} y={p.ly + 22} fontSize={13} textAnchor="middle" pointerEvents="none"
+                    style={{ fill: 'var(--map-text-muted, #999)', fontFamily: 'var(--font-mono, monospace)' }}>
+                    {on ? `${n} map${n === 1 ? '' : 's'}` : 'no maps yet'}{isHere ? ' · you are here' : ''}</text>
+                </>
+              ) : (
+                <text x={p.lx} y={p.ly} fontSize={13} textAnchor="middle" pointerEvents="none"
+                  style={{ fill: 'var(--map-text, #ddd)', fontFamily: 'var(--font-mono, monospace)' }}>
+                  Taisidon{isHere ? ' · here' : ''}</text>
+              )}
+            </g>
+          )
+        })}
+        {/* your province's outline last, so its neighbours don't paint over it */}
+        {PROVINCE_SHAPES.filter(p => p.id === here).map(p => (
+          <polygon key="here" points={p.points} fill="none" strokeLinejoin="round" pointerEvents="none"
+            style={{ stroke: 'var(--map-current-color, #4caf50)', strokeWidth: 3 }} />
+        ))}
+      </svg>
+      {elsewhere > 0 && (
+        <button className={`map-btn${here === 'Other' ? ' map-btn--active' : ''}`}
+          style={{ position: 'absolute', left: 10, bottom: 10 }}
+          onMouseEnter={() => onHover('Other')} onClick={() => onOpen('Other')}
+          title="Maps that belong to no province: events, mazes, transports and the like">
+          Elsewhere · {elsewhere} map{elsewhere === 1 ? '' : 's'}{here === 'Other' ? ' · here' : ''}
+        </button>
+      )}
+    </div>
+  )
+}
+
 function DaMapsCanvas({ world: daWorld, lichDb, currentRoom, character, onSendCommand }: {
   world: DaWorld; lichDb: Map<number, LichRoom>; currentRoom?: LichRoom; character: string; onSendCommand: (cmd: string) => void
 }) {
   // ── Areas ──────────────────────────────────────────────────────────────────
   const [mode, setMode] = useState<'local' | 'global'>('local')
   const src = useMemo(() => getSource(daWorld, lichDb), [daWorld, lichDb])
-  // The whole world is built the first time Global is opened, then cached.
+  // Global opens on a map of the provinces (Kaesken); clicking one lists its
+  // maps. A province's maps are laid out the first time it's opened, then cached.
+  const [province, setProvince] = useState<string | null>(null)
   const world = useMemo(() => {
-    if (mode !== 'global' && !worldCache.has(src)) return null
-    let w = worldCache.get(src)
-    if (!w) { w = buildWorld(src); worldCache.set(src, w) }
+    if (mode !== 'global' || !province) return null
+    let byProv = worldCache.get(src)
+    if (!byProv) { byProv = new Map(); worldCache.set(src, byProv) }
+    let w = byProv.get(province)
+    if (!w) { w = buildWorld(src, province); byProv.set(province, w) }
     return w
-  }, [mode, src])
+  }, [mode, src, province])
   const [hoverArea, setHoverArea] = useState<string | null>(null)
+  const [hoverProv, setHoverProv] = useState<string | null>(null)
+  /** maps (ground floors with rooms) per province, for the province map */
+  const provinceCounts = useMemo(() => {
+    const c = new Map<string, number>()
+    for (const k of src.globalKeys) {
+      if (src.roomCount(k) === 0) continue
+      const p = src.province(k)
+      c.set(p, (c.get(p) ?? 0) + 1)
+    }
+    return c
+  }, [src])
+  function openProvince(p: string | null) {
+    globalTfRef.current = null
+    setHoverArea(null)
+    setProvince(p)
+  }
 
   const [areaImage, setAreaImage] = useState<string>('')
   const hereImage = currentRoom ? src.areaOf(currentRoom.id, areaImage) : ''
   const [followPlayer, setFollowPlayer] = useState(true)
+  const hereProvince = hereImage ? src.province(src.floors(hereImage)[0] ?? hereImage) : null
   const area = useMemo(() => src.area(areaImage), [src, areaImage])
   useEffect(() => { if (!areaImage && hereImage) setAreaImage(hereImage) }, [areaImage, hereImage])
   // A different source (Genie maps just loaded) uses different area keys.
@@ -263,7 +371,7 @@ function DaMapsCanvas({ world: daWorld, lichDb, currentRoom, character, onSendCo
   const globalTfRef = useRef<Transform | null>(null)
   const localTfRef = useRef<Transform | null>(null)
   function switchMode(next: 'local' | 'global') {
-    if (next === mode) return
+    if (next === mode) { if (next === 'global' && province) openProvince(null); return }
     if (mode === 'global') globalTfRef.current = transform
     else localTfRef.current = transform
     setMode(next)
@@ -673,10 +781,14 @@ function DaMapsCanvas({ world: daWorld, lichDb, currentRoom, character, onSendCo
         <button className={`map-btn map-btn--sm${mode === 'local' ? ' map-btn--active' : ''}`}
           onClick={() => switchMode('local')} title="Local — the area you're in (or the one you opened from Global)">Local</button>
         <button className={`map-btn map-btn--sm${mode === 'global' ? ' map-btn--active' : ''}`}
-          onClick={() => switchMode('global')} title="Global — every area, grouped by province. Click one to open it.">Global</button>
+          onClick={() => switchMode('global')} title="Global — a map of the provinces. Click one to list its maps.">Global</button>
+        {mode === 'global' && province && (
+          <button className="map-btn map-btn--sm" onClick={() => openProvince(null)}
+            title="Back to the map of the provinces">◂ Provinces</button>
+        )}
         <span className="map-toolbar-location">
           {mode === 'global'
-            ? 'All areas'
+            ? (province === 'Other' ? 'Elsewhere' : province ?? 'Provinces')
             : area ? `${area.name}${hereRoom ? ' · 📍 here' : ''}` : ''}
         </span>
       </div>
@@ -691,7 +803,8 @@ function DaMapsCanvas({ world: daWorld, lichDb, currentRoom, character, onSendCo
             if (hereImage !== areaImage) setAreaImage(hereImage)
             else if (hereRoom) centerOn(hereRoom, INDOOR_SCALE)
           }}>◆</button>
-        <button className="map-btn" title={mode === 'global' ? 'Fit all areas to view' : 'Fit area to view'}
+        <button className="map-btn" disabled={mode === 'global' && !province}
+          title={mode === 'global' ? 'Fit all of this province\'s maps to view' : 'Fit area to view'}
           onClick={() => {
             setFollowPlayer(false)
             if (mode === 'global' && world && svgRef.current) {
@@ -763,6 +876,11 @@ function DaMapsCanvas({ world: daWorld, lichDb, currentRoom, character, onSendCo
           </g>
         </svg>
 
+        {mode === 'global' && !province && (
+          <ProvinceMap counts={provinceCounts} here={hereProvince} hover={hoverProv}
+            onHover={setHoverProv} onOpen={openProvince} rightInset={showPanel ? PANEL_W + 16 : 0} />
+        )}
+
         {showPanel && (mode === 'global' || area) && (
           <div style={{
             position: 'absolute', top: 8, right: 8, bottom: 8, width: PANEL_W, maxWidth: '45%',
@@ -811,7 +929,19 @@ function DaMapsCanvas({ world: daWorld, lichDb, currentRoom, character, onSendCo
                   <div style={{ ...muted, marginTop: 8 }}>Right-click any room to <code>;go2</code> there.</div>
                 </>
               )}
-              {tab === 'room' && mode === 'global' && (
+              {tab === 'room' && mode === 'global' && !province && (
+                hoverProv ? (
+                  <>
+                    <div style={{ ...muted, fontSize: '0.91em' }}>hovered province</div>
+                    <div style={{ fontWeight: 'bold', marginTop: 2 }}>{hoverProv === 'Other' ? 'Elsewhere' : hoverProv}</div>
+                    <div style={muted}>{provinceCounts.get(hoverProv) ?? 0} maps{hoverProv === hereProvince ? ' · you are here' : ''}</div>
+                    <div style={{ ...muted, marginTop: 8, fontStyle: 'italic' }}>Click to list its maps</div>
+                  </>
+                ) : (
+                  <div style={muted}>Hover a province to see what's in it. Click one to list its maps.</div>
+                )
+              )}
+              {tab === 'room' && mode === 'global' && province && (
                 hoveredWorldArea ? (
                   <>
                     <div style={{ ...muted, fontSize: '0.91em' }}>hovered area</div>
@@ -854,7 +984,8 @@ function DaMapsCanvas({ world: daWorld, lichDb, currentRoom, character, onSendCo
       <div style={{ flexShrink: 0, padding: '4px 8px', fontSize: 11, color: 'var(--map-text-muted, #888)',
         borderTop: '1px solid var(--map-border-subtle, #333)' }}>
         {DA_MAPS_NAME}{mode === 'global'
-          ? (world ? ` · ${world.areas.length} areas · ${world.areas.reduce((n, a) => n + a.rooms, 0)} rooms` : '')
+          ? (world ? ` · ${province === 'Other' ? 'Elsewhere' : province} · ${world.areas.length} maps · ${world.areas.reduce((n, a) => n + a.rooms, 0)} rooms`
+            : ` · ${[...provinceCounts.values()].reduce((n, c) => n + c, 0)} maps in ${provinceCounts.size} provinces`)
           : (area ? ` · ${area.name} · ${area.rooms.length} rooms` : '')}
       </div>
     </div>
