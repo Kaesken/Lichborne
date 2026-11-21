@@ -481,25 +481,9 @@ function DaMapsCanvas({ world: daWorld, lichDb, currentRoom, character, onSendCo
     ))
   }, [area, showIndoor])
 
-  const buildingShapes = useMemo(() => {
-    if (!area) return null
-    return area.buildings.map((b, i) => b.outline && (
-      <rect key={`b${i}`} x={b.x1} y={b.y1} width={b.x2 - b.x1} height={b.y2 - b.y1} rx={2}
-        fill={showIndoor ? 'none' : 'var(--map-node-fill, #2a2a2a)'}
-        fillOpacity={showIndoor ? 0 : 0.85}
-        stroke="var(--map-node-stroke, #555)" strokeWidth={1} vectorEffect="non-scaling-stroke"
-        strokeDasharray={showIndoor ? '3 2' : undefined}
-        style={{ cursor: showIndoor ? undefined : 'pointer' }}
-        pointerEvents={showIndoor ? 'none' : 'all'}
-        onMouseEnter={() => { if (!dragRef.current?.moved) { setHoverBuilding(i); setHoverId(null) } }}
-        onContextMenu={e => {
-          e.preventDefault()
-          const first = b.rooms.map(id => area!.byId.get(id)?.lich).find(l => l != null)
-          if (first != null) onSendCommand(`;go2 ${first}`)
-        }}
-      />
-    ))
-  }, [area, showIndoor, onSendCommand])
+  // No building outlines (Kaesken, 2026-11-21): the dotted boxes only caught
+  // some of the indoor rooms, and indoor areas will be shown in the map art.
+  // Building names still sit beside their rooms.
 
   const roomRects = useMemo(() => {
     if (!area) return null
@@ -863,7 +847,6 @@ function DaMapsCanvas({ world: daWorld, lichDb, currentRoom, character, onSendCo
             ) : (
               <>
                 {arcPaths}
-                {buildingShapes}
                 {labels}
                 {roomRects}
                 {routePath(pinnedRoute, 'var(--accent, gold)')}
@@ -913,12 +896,6 @@ function DaMapsCanvas({ world: daWorld, lichDb, currentRoom, character, onSendCo
                     </div>
                   ))}
                   <div style={sectionHead}>Other</div>
-                  <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, marginBottom: 3 }}>
-                    <svg width={14} height={14} style={{ flexShrink: 0, alignSelf: 'center' }}>
-                      <rect x={1} y={1} width={12} height={12} rx={2} fill="none" stroke="var(--map-node-stroke, #555)" strokeDasharray="3 2" />
-                    </svg>
-                    <span style={muted}>Building (indoor rooms)</span>
-                  </div>
                   <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, marginBottom: 3 }}>
                     <svg width={14} height={14} style={{ flexShrink: 0, alignSelf: 'center' }}>
                       <rect x={1} y={1} width={12} height={12} fill="var(--map-node-fill, #2a2a2a)" stroke="var(--map-node-stroke, #555)" strokeDasharray="1.5 1.5" />
