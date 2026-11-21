@@ -898,6 +898,12 @@ function DaMapsCanvas({ world: daWorld, lichDb, currentRoom, character, onSendCo
                   <div style={sectionHead}>Other</div>
                   <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, marginBottom: 3 }}>
                     <svg width={14} height={14} style={{ flexShrink: 0, alignSelf: 'center' }}>
+                      <rect x={1} y={1} width={12} height={12} rx={2} fill="none" stroke="var(--map-node-stroke, #555)" strokeDasharray="3 2" />
+                    </svg>
+                    <span style={muted}>Building (indoor rooms)</span>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, marginBottom: 3 }}>
+                    <svg width={14} height={14} style={{ flexShrink: 0, alignSelf: 'center' }}>
                       <rect x={1} y={1} width={12} height={12} fill="var(--map-node-fill, #2a2a2a)" stroke="var(--map-node-stroke, #555)" strokeDasharray="1.5 1.5" />
                       <text x={7} y={7.5} fontSize={10} fontWeight="bold" fill="var(--map-text, #ddd)" textAnchor="middle" dominantBaseline="central">?</text>
                     </svg>
