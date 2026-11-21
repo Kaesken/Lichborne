@@ -14,6 +14,8 @@
 import type { LichRoom } from '../mapTypes'
 
 /** The display name, kept in one place so it is easy to rename later. */
+import { FORAGE_ITEMS } from './forageItems'
+
 export const DA_MAPS_NAME = "Da'Maps"
 
 // ── Arc categories (same three as the Genie view, so the theme vars line up) ──
@@ -199,6 +201,17 @@ export function isIndoor(r: LichRoom): boolean {
   return /^Obvious exits/i.test(p)
 }
 
+// A tag counts as forage only when it names something that can be foraged
+// (dr-scripts' list), allowing a describing word in front ("oak limb",
+// "sprig of lavender") and singular or plural. Everything else Lich tags a room
+// with (NPCs like "priestess", shops, room nicknames like "tgs") is not forage.
+const singular = (w: string) => w.replace(/ies$/, 'y').replace(/ie$/, 'y').replace(/(?<=[sxz]|ch|sh)es$/, '').replace(/(?<!s)s$/, '')
+const FORAGE_NAMES = FORAGE_ITEMS.map(i => i.split(' ').map(singular).join(' '))
+export function isForageTag(tag: string): boolean {
+  const t = tag.toLowerCase().split(/\s+/).map(singular).join(' ')
+  return FORAGE_NAMES.some(i => t === i || t.endsWith(' ' + i))
+}
+
 export function splitTags(tags: string[] | undefined): { forage: string[]; hunting: string[]; services: string[]; category: string | null } {
   const forage: string[] = [], hunting: string[] = [], services: string[] = []
   let best: string | null = null
@@ -216,7 +229,7 @@ export function splitTags(tags: string[] | undefined): { forage: string[]; hunti
     if (NON_FORAGE.has(key)) continue
     // Hunting-area tags are snake_case ids ("pale_grey_death_squirrels").
     if (key.includes('_')) { hunting.push(t.replace(/_/g, ' ').replace(/\d+$/, '').trim()); continue }
-    forage.push(t)
+    if (isForageTag(t)) forage.push(t)
   }
   return { forage, hunting: [...new Set(hunting)], services, category: best }
 }

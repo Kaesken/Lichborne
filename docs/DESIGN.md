@@ -4236,7 +4236,7 @@ The file keeps rooms as `[id, lich id, x, y, fill, marker target, title]`, lines
 **Derived from Lich fields:**
 - indoor/outdoor — `paths[0]` starts "Obvious exits" (indoor) vs "Obvious paths" (outdoor)
 - room colour — the map's own colour; a square the map leaves plain takes a category from `tags` (`npchealer`, guild names, stat names, `bank`, shop tags, `portal`…), using the COLOR_LEGEND hexes; `swim` exits → water
-- forage — plain tags; hunting areas — snake_case tags
+- forage — a tag that names a forageable item from dr-scripts' `data/base-forage.yaml` (132 items, snapshotted into `damaps/forageItems.ts` by `tools/damaps/build-forage-items.mjs`; a describing word in front and singular/plural are allowed). Other plain tags (NPCs like `priestess`, shop shortcuts, room nicknames like `tgs`, script snippets) are dropped; before 2026-11-21 they all showed as forage. Hunting areas — snake_case tags
 - buildings — connected indoor rooms with the same title prefix ("Half Pint, Bar" + "Half Pint, Kitchen"), drawn as a dotted outline; one-room shops get no outline
 - place names — the map's own text labels
 
