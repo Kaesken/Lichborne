@@ -138,3 +138,27 @@ export function hydrateArea(a: DaWorldArea, lichDb: Map<number, LichRoom>): DaAr
     : { x1: 0, y1: 0, x2: 100, y2: 100 }
   return { image: a.key, name: a.name, rooms, byId, byLich, arcs, buildings, bbox, texts }
 }
+
+// ── Map art (painted backgrounds) ────────────────────────────────────────────
+// Kaesken paints a background for each map over the guide PNGs that
+// tools/damaps/export-map-art.py makes. The finished PNGs live in
+// src/renderer/public/damaps-art/, and tools/damaps/sync-map-art.mjs writes
+// damaps-art/art.json listing only the maps that have one. Each entry says
+// where its image sits on the map: its top-left (x, y) in map units and its
+// pixel size at `scale` pixels per map unit.
+
+export interface DaArt { key: string; file: string; x: number; y: number; scale: number; width: number; height: number }
+
+let artLoading: Promise<Map<string, DaArt>> | null = null
+/** The painted backgrounds, by area key. Empty when there are none. */
+export function loadDaArt(): Promise<Map<string, DaArt>> {
+  if (!artLoading) {
+    artLoading = readJson('./damaps-art/art.json')
+      .then(raw => {
+        const maps = (raw as { maps?: DaArt[] })?.maps
+        return new Map((Array.isArray(maps) ? maps : []).map(m => [m.key, m]))
+      })
+      .catch(() => new Map<string, DaArt>())
+  }
+  return artLoading
+}

@@ -4231,6 +4231,8 @@ The file keeps rooms as `[id, lich id, x, y, fill, marker target, title]`, lines
 
 **Tours follow Da'Maps' maps.** `node tools/damaps/build-tour-list.mjs` writes [tools/damaps/damaps-maps.txt](../tools/damaps/damaps-maps.txt): one line per Da'Maps map (all floors), its name and the Lich IDs drawn on it. Put it next to damaps-mana.lic and `;damaps-mana tour <map>` visits exactly those rooms (an exact name wins over prefixes; "here" is the map you're standing on). Lich's own area names were too narrow: much of the town is filed under Zoluren or its own area (shops, the Academy, Shipyard, Market Plaza), so a "Crossing" tour by area name covered about half the Crossing map. Re-run it whenever damaps-world.json is rebuilt.
 
+**Map art (painted backgrounds, Kaesken 2026-11-21).** `python3 tools/damaps/export-map-art.py <out>` draws every map as a guide PNG on a transparent canvas at a fixed 3 px per map unit, origin snapped to 10 units, and writes where each one sits to [tools/damaps/map-art.json](../tools/damaps/map-art.json). Kaesken paints under the guide and exports at the same pixel size. A finished PNG goes in `src/renderer/public/damaps-art/` under the guide's folder and name; `node tools/damaps/sync-map-art.mjs` then writes `damaps-art/art.json`, listing only the maps that have art. DaMapsView reads it once (`loadDaArt`) and draws the image under the lines and squares at the map's origin, `width / scale` map units wide, so it lines up exactly. A map with no art looks as before.
+
 **Licence:** it is derived from the GenieClient/Maps community maps, which carry no licence. That is fine for Kaesken's fork; before offering Da'Maps upstream, ask the map makers (#automapper) for permission or replace the file.
 
 **Derived from Lich fields:**

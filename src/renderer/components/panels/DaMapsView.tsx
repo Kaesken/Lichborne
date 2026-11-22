@@ -13,7 +13,7 @@
 import { useState, useRef, useEffect, useMemo, useCallback, type CSSProperties } from 'react'
 import type { LichRoom } from './mapTypes'
 import { COLOR_LEGEND } from './mapTypes'
-import { loadDaWorld, hydrateArea, DA_ROOM_SIZE, type DaWorld } from './damaps/damapsWorld'
+import { loadDaWorld, loadDaArt, hydrateArea, DA_ROOM_SIZE, type DaWorld, type DaArt } from './damaps/damapsWorld'
 import { lichTitle } from './mapTypes'
 import {
   DA_MAPS_NAME, DA_ARC_COLOR, DA_CATEGORIES, DA_OBS_EVENT,
@@ -315,6 +315,10 @@ function DaMapsCanvas({ world: daWorld, lichDb, currentRoom, character, onSendCo
   const [followPlayer, setFollowPlayer] = useState(true)
   const hereProvince = hereImage ? src.province(src.floors(hereImage)[0] ?? hereImage) : null
   const area = useMemo(() => src.area(areaImage), [src, areaImage])
+  // The painted background for this map, if one has been made (map art).
+  const [artByKey, setArtByKey] = useState<Map<string, DaArt> | null>(null)
+  useEffect(() => { let live = true; loadDaArt().then(m => { if (live) setArtByKey(m) }); return () => { live = false } }, [])
+  const art = area ? artByKey?.get(area.image) : undefined
   useEffect(() => { if (!areaImage && hereImage) setAreaImage(hereImage) }, [areaImage, hereImage])
   // A different source (Genie maps just loaded) uses different area keys.
   useEffect(() => { setAreaImage(currentRoom ? src.areaOf(currentRoom.id) : '') }, [src]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -846,6 +850,11 @@ function DaMapsCanvas({ world: daWorld, lichDb, currentRoom, character, onSendCo
               </>
             ) : (
               <>
+                {art && (
+                  <image href={'./damaps-art/' + art.file.split('/').map(encodeURIComponent).join('/')}
+                    x={art.x} y={art.y} width={art.width / art.scale} height={art.height / art.scale}
+                    preserveAspectRatio="none" pointerEvents="none" />
+                )}
                 {arcPaths}
                 {labels}
                 {roomRects}
