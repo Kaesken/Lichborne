@@ -158,10 +158,27 @@ function foldInto(parent: GenieZone, kids: GenieZone[], byFile: Map<string, stri
       const door = m?.arcs.map(a => a.destination).find(d => d && byId.has(d) && !isStub(byId.get(d)!))
       if (target && door !== undefined) doorOf.set(n.id, door)
     }
+    // A marker whose parent door couldn't be found stands for the parent room
+    // of the same name, when there is exactly one.
+    const kidById = new Map(kid.nodes.map(n => [n.id, n]))
+    const idMapValues = new Set(idMap.values())
+    const parentByName = (name: string) => {
+      const hits = nodes.filter(p => p.name === name && !isStub(p) && !idMapValues.has(p.id))
+      return hits.length === 1 ? hits[0].id : undefined
+    }
     for (const n of real) {
       const arcs: GenieArc[] = []
       for (const a of n.arcs) {
-        const d = idMap.get(a.destination) ?? doorOf.get(a.destination)
+        let d = idMap.get(a.destination) ?? doorOf.get(a.destination)
+        if (d === undefined && a.destination) {
+          // Never keep the sub-map's own number: on the parent map it names
+          // an unrelated room (Crossing Temple's gate drew a line to Magen
+          // Road this way). Use the same-named parent room, else no line.
+          const k = kidById.get(a.destination)
+          d = k ? parentByName(k.name) : undefined
+          arcs.push({ ...a, destination: d ?? 0 })
+          continue
+        }
         arcs.push(d !== undefined ? { ...a, destination: d } : { ...a })
       }
       const copy: GenieNode = { ...n, id: idMap.get(n.id)!, x: n.x + off[0], y: n.y + off[1], z: n.z + ideal[2], zoneId: parent.id, zoneName: parent.name, arcs }
