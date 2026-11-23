@@ -67,11 +67,15 @@ function menu() {
 
 /**
  * Where maps are kept: a My Maps folder beside the program (the portable exe sets
- * PORTABLE_EXECUTABLE_DIR), else Documents\DaMaps when run from source.
+ * PORTABLE_EXECUTABLE_DIR; the installed folder keeps the program in Program\\),
+ * else Documents\DaMaps when run from source.
  */
 function mapsFolder() {
-  const beside = process.env.PORTABLE_EXECUTABLE_DIR
-  const dir = beside ? path.join(beside, 'My Maps') : path.join(app.getPath('documents'), 'DaMaps')
+  const portable = process.env.PORTABLE_EXECUTABLE_DIR
+  // installed as a folder: <DaMaps Editor>\Program\DaMaps Editor.exe, maps in <DaMaps Editor>\My Maps
+  const dir = portable ? path.join(portable, 'My Maps')
+    : app.isPackaged ? path.join(path.dirname(process.execPath), '..', 'My Maps')
+    : path.join(app.getPath('documents'), 'DaMaps')
   fs.mkdirSync(dir, { recursive: true })
   return dir
 }

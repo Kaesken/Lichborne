@@ -6,7 +6,10 @@ reads from [`tools/damaps/maps/`](../damaps/maps/).
 
 ## Using it
 
-1. Open **DaMaps Editor.exe**. It needs no install.
+1. Open the **DaMaps Editor** shortcut. The program lives in a `Program` folder
+   beside your `My Maps` folder (`build.mjs --pack --dir` makes it; the
+   single-file portable exe works too but starts slowly, because it unpacks
+   itself every time).
 2. Open a map from the **My Maps** folder beside the program (**File → Open…**),
    start a new one (**File → New map**), or **File → Import Genie map…**.
 3. Edit with the four tools:
@@ -30,7 +33,8 @@ a room links it to another map by that map's link name.
 ```
 node tools/damaps-editor/build.mjs               # build into tools/damaps-editor/dist
 npx electron tools/damaps-editor/dist            # run it
-node tools/damaps-editor/build.mjs --pack        # Windows portable .exe in tools/damaps-editor/release
+node tools/damaps-editor/build.mjs --pack --dir  # the program folder (release/win-unpacked); starts fast
+node tools/damaps-editor/build.mjs --pack        # one portable .exe (starts slowly: it unpacks itself each time)
 node tools/damaps-editor/build.mjs --pack --zip  # or a zip of the program folder
 ```
 

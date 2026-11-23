@@ -1,6 +1,7 @@
 // Build the DaMaps Editor into dist/ (and, with --pack, a Windows program).
 //   node tools/damaps-editor/build.mjs          build only
 //   node tools/damaps-editor/build.mjs --pack   build + Windows portable exe in tools/damaps-editor/release/
+//   node tools/damaps-editor/build.mjs --pack --dir   the program folder only (release/win-unpacked; starts much faster)
 //   npx electron tools/damaps-editor/dist       run it from source
 import { build } from 'esbuild'
 import fs from 'node:fs'
@@ -23,7 +24,7 @@ console.log('built', path.relative(process.cwd(), dist))
 if (process.argv.includes('--pack')) {
   const { build: pack, Platform } = await import('electron-builder')
   await pack({
-    targets: Platform.WINDOWS.createTarget(process.argv.includes('--zip') ? 'zip' : 'portable', 1 /* x64 */),
+    targets: Platform.WINDOWS.createTarget(process.argv.includes('--zip') ? 'zip' : process.argv.includes('--dir') ? 'dir' : 'portable', 1 /* x64 */),
     projectDir: dist,
     config: {
       appId: 'com.lichborne.damaps-editor', productName: 'DaMaps Editor',
