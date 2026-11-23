@@ -3517,7 +3517,7 @@ The Map System is a spatially-aware map visualization built around two views.
 - `GenieMapView` — Genie XML rendering with click-to-walk, follow-the-player camera, hover path preview
 - `mapTypes.ts` — shared types (`LichRoom`, `GenieZone`, `GenieNode`, `GenieArc`, `GenieLabel`), `parseGenieZone` parser, `findRoom` / `bfsPath` helpers, `COLOR_LEGEND` constant
 
-**Auto-reload:** when `repository.lic` downloads a new Lich map database, the main stream carries `--- Map loaded <filename>.json`. `GameWindow` detects this pattern and increments `lichMapVersion`, which triggers `MapPanel` to reload the JSON database. (Genie XML files are not auto-reloaded — the user re-picks the folder if they update their map set.)
+**Auto-reload:** when Lich loads a new map database, the main stream carries `--- Map loaded <filename>.json` (since Lich 5.20.0, `--- <script> Map loaded …` when a script started the load). `GameWindow` detects either form and increments `lichMapVersion`, and `MapPanel` re-reads the JSON only if the newest file's path, time or size differs from the one loaded. Since v1.1.0 the Genie folder and Lich's `scripts/data` files are also re-checked when a map view is shown or the window regains focus; see §19.19, "Noticing updated maps" (B624).
 
 ### 19.2 Map File Format
 
@@ -4032,13 +4032,7 @@ Two handlers on each node `<g>`. The SVG root has `onContextMenu={preventDefault
 
 `onNodeContextMenu` (**right-click**): walks to the clicked node. `preventDefault` + `stopPropagation`, then BFS within the current zone and `sendWalkPath`. For a stub this walks to the boundary room (the stub IS a real room in the current zone). Cross-zone click-to-walk is NOT supported — Genie arc destinations are zone-local IDs; the map auto-switches zones via the title-match effect once the player actually crosses.
 
-`sendWalkPath(commands, onComplete?)` clears any in-flight timers, then schedules each command at `WALK_STEP_MS` (600ms) intervals via `setTimeout`.
-
-Walk timers are cleared on zone change AND on unmount. Level change does NOT clear walk timers — paths can legitimately include up/down arcs. Walk commands echo to the game window as `>cmd` lines via `sendCommand`.
-
-Walk timers are cleared on zone change AND on unmount. Level change does NOT clear walk timers — click-to-walk paths can legitimately include up/down arcs.
-
-Walk commands are echoed to the game window as `>cmd` lines via `sendCommand` in `GameWindow.tsx`. Same code path as typed commands, quick-send, room-exit clicks, and in-text command links — they all share the `command-echo` preset.
+`sendWalkPath(commands, label)` hands the route to the character's walker (§19.18). Until v1.0.2 it sent one step every 600 ms (`WALK_STEP_MS`) on a timer, whatever the game answered; that is gone, along with the timers this component used to own, so closing the map or browsing another zone no longer stops a walk.
 
 #### 19.16.10 Rendering Layer Order
 
@@ -4081,7 +4075,7 @@ Each category falls into one of these structural families:
 | **Rising particles** (upward stream from below the rect) | 2 `<circle>` per node animating `translateY` negative | Guildleader (XP rise) |
 | **Underwater bubbles** | 2 `<circle>` rising with a scale "pop" at the top | Underwater |
 | **Aura modifier** (modifies the aura rect's animation or size) | CSS class applied to the aura rect | Interesting Room (fire flicker + 1.3× size), Housing/Guildleader (intensified static aura) |
-| **Static glyph** (centered text on the rect) | `<text>` element with the icon character | Mining (⛏), Lumberjacking (🪓) |
+| **Static icon** (centred on the rect) | Two small `<path>`s (`ToolIcon`), never a text character (§19.17.7) | Mining (pickaxe), Lumberjacking (axe) |
 
 #### 19.17.2 Pattern for Adding a New Effect
 
@@ -4111,7 +4105,7 @@ Inside the SVG `<g transform>` pan/zoom group, the current order is:
 1. `auras` — translucent color halos behind colored rooms (always-on layer for any COLOR_LEGEND room)
 2. `arcPathsUnder` — full-opacity arc passes (cardinal / climb / go)
 3. `labelTexts` — floating landmark labels (Temple of Light, etc.)
-4. `nodeRects` — 8×8 room rects (with stub `↗` glyph and tool ⛏/🪓 glyphs as children)
+4. `nodeRects` — 8×8 room rects (with the stub `↗` glyph and the pickaxe/axe icons as children)
 5. `arcPathsOver` — faint over-pass arc traces through rect fills
 6. `sparkles` — magical motes (Transport / Shrine / Favor Altar / Stat Training)
 7. `heartbeats` — Healer ECG pulse
@@ -4154,14 +4148,11 @@ function dirtParticleColor(roomColor: string): string {
 
 Mining gets warm rusty-brown; Trailhead gets sandy tan. The original Mining color `#4a2810` was too dark to read against the dark map background — testers couldn't see falling particles at all on mining rooms. Brighter rust-brown solved it.
 
-#### 19.17.7 Tool Glyphs
+#### 19.17.7 Tool Icons
 
-`TOOL_GLYPHS: Record<string, string>` maps category hex → emoji/text glyph:
+`TOOL_OF_COLOR` maps a category colour to a tool: `#993300` → pickaxe (Mining), `#008000` → axe (Lumberjacking). `ToolIcon` draws it as two small `<path>`s from `TOOL_PATHS`, about 5 units across (half the stub glyph), white so it reads on both room colours. It is a child of the per-node `<g>` in `nodeRects`, only when the room is NOT a stub: stubs preempt the slot with `↗` because cross-zone identity is more important than resource category. The legend draws the same icon.
 
-- `#993300` → `⛏︎` (Mining pickaxe, U+26CF)
-- `#008000` → `🪓︎` (Lumberjacking axe, U+1FA93)
-
-Trailing **U+FE0E** (text variation selector) forces text-style rendering in browsers that might otherwise render these as colored emoji. The glyph renders as a child of the per-node `<g>` in `nodeRects`, but only when the room is NOT a stub — stubs preempt the slot with `↗` because cross-zone identity is more important than resource category. Font size 5px (half the stub glyph's 10px) so the tool reads as a category marker, not a category banner.
+**Shapes, never characters (v1.1.0, pitfall #204).** Until v1.1.0 these were the text `⛏︎` (U+26CF) and `🪓︎` (U+1FA93), each with U+FE0E asking for text presentation. No ordinary text font has an axe. Chromium re-shapes SVG text whenever the zoom scale changes, and each time it searched the system fonts for one, which slowed the shaping of every other text on the map about 40-fold. Zooming the Shard to Gondola map (25 axes) took about 250 ms a frame, against 17 ms with the axes hidden (measured in a visible window, `tmp-graph-map/perf/gpu.js`). 585 lumberjacking rooms in 23 zones were affected, on the Genie Maps view as well as the Graph view. A path has no font to look for, and looks the same on every platform.
 
 #### 19.17.8 Performance — Animation Pause + Parse Cache
 
@@ -4196,6 +4187,8 @@ Invalidation triggers:
 - Selected folder path differs from the cached `dir` field
 - `GENIE_CACHE_VERSION` constant bumps (used when the `GenieZone` shape changes; old caches invalidate automatically without manual cleanup)
 
+Since v1.1.0 the fingerprint is taken BEFORE the parse and saved with the cache (`genie-cache:save`'s optional `fingerprint`), so a file changed mid-parse is re-read next time, and `genie-cache:fingerprint` lets an open map ask whether the folder changed without reading it (§19.19, "Noticing updated maps").
+
 The cache file is single-blob JSON (~2-5 MB depending on folder size); loaded as one file read and one `JSON.parse` call. Cache write is fire-and-forget after parse — failure logs to console but doesn't block the user from seeing the freshly-parsed map.
 
 #### 19.17.9 Aura Variants
@@ -4209,7 +4202,311 @@ Player Housing (`#00FFFF`) was in `AURA_FIRE_COLORS` (hearth-glow flicker) throu
 
 When an animated aura class is applied, the `opacity` SVG attribute is omitted (`undefined`) so CSS owns opacity unambiguously — having both an attribute and a CSS animation on the same property creates browser-inconsistency.
 
-### 19.18 Da'Maps View (DaMapsView) *(experimental)*
+### 19.18 Genie map walking (v1.0.2)
+
+Damiza's report (posted on Discord as Obsidian): a right-click walk to the Crossing Barbarians' Guild sent `script crossingtrainerfix go barbarian guild` to the game ("Please rephrase that command"), kept sending the steps after it ("You can't go there"), and was slow at one step every 600 ms.
+
+**How Genie does it** (read from its source, 2026-11-16). A right-click doesn't send steps: it sends `.automapper <step> <step> …` (`Mapper/AutoMapper.cs`, `GraphForm_MoveMapPath`), handing the route to `automapper.cmd`, a ~2,500-line script the Genie maps team ships. That script sends a step, waits for the game's "Obvious paths", and reads every reply: failed (`move_FAIL`), try again (`move_RETRY`: "…wait", stunned, webbed), stand up, retreat, stow, closed shops. A step's first word is a TYPE (`rt west`, `swim south`, `search go faint trail`, `script autoclimbup`) that it strips and acts on, some by running a helper `.cmd`. Its only speed control is type-ahead: 1 by default, and its comments say standard accounts 1, premium 2, LTB 3. Genie's type-ahead counts commands WAITING behind the one moving (its loop sends while `typeahead >= depth`), so Genie's 1 is Lichborne's "steps ahead" 2: ours counts every step on its way.
+
+**Lichborne's version** is [genieWalk.ts](../src/renderer/genieWalk.ts), pure and harnessed (`tmp-genie-walk/`, 63 cases), driven from GameWindow:
+
+- **The step table (`planGenieStep`).** A fixed table of what each step amounts to, written from automapper.cmd and the helper scripts. It is not a script runtime: players can't edit it, and anything needing real logic stops the walk.
+  - `rt`, `swim`, `slow`, `ice`, `web`, `muck`, `wait`: removed, and the rest is sent.
+  - `a;b` sends both.
+  - `search go X` tries `go X` first, then `search` and `go X` again.
+  - `objsearch thing go X` searches the thing, then goes.
+  - `none` is skipped; `dive …` is sent as is.
+  - `script autoclimbup` / `autoclimbdown` become `climb up` / `climb down`, sent again on a slip.
+  - `script sandspit` / `hibintelligence` try the "other" barrel / steel door on "You can't do that."
+  - `script armoire` opens and searches it, then goes.
+  - `script hollowevevine` is `tap vine`.
+  - `script crossingtrainerfix <step>` is the step, as automapper.cmd's MOVE.RT sends it. (A first version also sent `out` and the step again on a failure; `out` moves you, and its arrival was counted as the step landing.) The official maps dropped it in January 2026 (GenieClient/Maps `096409a`, "DeleteTrainerFix"); older copies still have it, which is how Damiza hit it.
+- **Steps that need the player.** Every other `script …`, every `room …`, and any step with a Genie `#` or `.` command. The walk goes as far as the room before, then says what's needed (`MANUAL_SCRIPTS` has a sentence for each known one, from its `.cmd`).
+- **The walker (`GenieWalker`).**
+  - It sends a step and waits for the arrival: the `room-id` event from DR's `<nav rm>`. In Lich's 41 DR fixtures every `<nav>` came with a room change and LOOK/PEER/LOCATE sent none. One exception, from Agan's capture (2026-11-01): a Moon Mage's telescope view sends an empty `<nav/>` (no event) and then `<nav rm>` for the room you're standing in, 132 times there. The walker therefore ignores an arrival with the same room id as the last one; a route never steps into the room you're in, so that can't be a step landing. `onArrival(roomId)` is called for every arrival, walking or not, so the walker always knows the current room. Across Agan's, Sekmeht's and two more captures, no turn had more than one real move.
+  - It reads main-window lines against lists kept as written in automapper.cmd. A failure stops the walk, or tries once more if the setting is on. "Please rephrase" on a bare noun gets `go <noun>`, automapper's MOVE.GO. "…wait" and stuns resend after the roundtime. Standing, combat, full hands, invisibility, fatigue, mud, a closed way, the galley and the drawbridge stop the walk with a reason: it never stands, retreats or stows for you (Sekmeht's call).
+  - Steps ahead (1–3) pipelines plain steps only; anything with extra commands, a fallback, a retry list or a wait waits until it lands. "Sorry, you may only type ahead" with more than one step on its way means the game refused the newest: it is sent again once the one before lands, and the walk keeps one fewer on its way from then on.
+  - Genie's quick-send prefix `-N` (`push wall;-3 go wall`) is a wait of N seconds before that command (Genie's Command.cs turns `-` into `#send`, whose `Send()` reads a leading number as the pause). A bare `-` waits for nothing. Seven steps in today's maps use it. A part naming a Genie variable (`$haven.pw`) stops the walk, like a Genie command does.
+  - 15 s without an answer stops the walk (2 minutes for a climb or a step the game says is a long one).
+  - An arrival when nothing was sent stops it.
+  - So does any movement command you send yourself: every send path calls `noteSentRef`, and the walker's own sends set `walkSendingRef`.
+- **Where it lives.** One walker per character in GameWindow (it needs that character's arrivals, replies and send path). The map reaches it through `GenieWalkContext`, so both mount sites share it. A walk survives the map closing; a reconnect-in-place (pitfall #69) or unmount stops it quietly; a replayed batch never feeds it.
+- **What the player sees.**
+  - One line when a walk starts, saying how far it goes if a step will need them, and one when it arrives, pauses or stops, naming the step and the game's reply.
+  - The map toolbar shows "→ room 4/12" and ■ while it runs.
+  - Each step echoes `>cmd` unless "show each step" is off; it is logged either way.
+- **`#goto`.** Typed in the command bar (`dispatchUserText`, after the slash intercept), never sent to the game.
+  - The mounted map registers `planGenieGoto` through the context.
+  - Genie's rule (`AutoMapper.cs` "goto"): a number of up to five digits is a room id on the current map, anything else is matched against room notes.
+  - We prefer an exact note over a prefix, and the nearest match over the last one in the file.
+  - It works within the current map only, like Genie, and names the map a note is on when it isn't this one.
+  - Without a Genie map mounted it says to open one.
+- **Settings** (per character, Settings → Behavior, `AppSettings.mapWalk*`):
+  - steps ahead (1–3, default 1);
+  - try a failed step once more (off);
+  - pause after each room (0–1000 ms, 0);
+  - show each step (on).
+  These replaced the unreleased millisecond setting.
+- **No slash command, by decision (Sekmeht).** Settings stay in Settings, and `#goto` is Genie's own form, kept for Genie map users. The `/walkspeed` command that briefly existed in the 1.0.2 work was removed before release.
+
+### 19.19 Genie maps download (v1.0.2)
+
+Sekmeht's ask: download and update the Genie maps from inside Lichborne, into a folder it owns, instead of making players fetch the ZIP, unzip it and pick the folder.
+
+**Source.** `https://github.com/GenieClient/Maps/archive/refs/heads/main.zip` (redirects to codeload.github.com). Measured 2026-11-16: 4.07 MB, 163 entries, 18 MB unpacked, 93 top-level `Map*.xml`, stored and deflated entries only, no data descriptors, no ZIP64. Every entry sits under `Maps-main/`, and the archive's zip comment is the 40-hex commit id. GitHub sends no `Content-Length`, so progress is MB received, not a percentage.
+
+**Where.** `{userData}/GenieMaps`, the same folder for every character (the maps setting, `lichborne.genieMapsDir`, has always been app-wide). `Maps-main/` is stripped, so the XMLs sit at the top of GenieMaps the way Genie keeps them; the subfolders (Archived Maps, Festivals…, the scripts folder) come along and are ignored like any other subfolder (`list-map-dir` reads the top level only). A marker file `.lichborne-genie-maps.json` records the source, commit, install time and map count.
+
+**Replace only when ready** ([genieMapsDownload.ts](../src/main/genieMapsDownload.ts)). The ask was "purge the folder, fetch, extract"; the order is reversed so a failed download can never leave the player with no maps (Principle #3):
+1. Download the whole zip into memory (capped at 64 MB; 30 s with no bytes = stalled).
+2. Read it: refuse anything that isn't a zip, ZIP64, encrypted, multi-part, entries outside one top folder, unsafe names (`..`, drive letters, backslashes, Windows-reserved characters), a wrong size or CRC, more than 512 MB unpacked, or fewer than 10 top-level maps (a GitHub error page or an unrelated archive).
+3. Extract into `GenieMaps.new` and write the marker.
+4. Swap: `GenieMaps` → `GenieMaps.old`, `.new` → `GenieMaps`, delete `.old`. A failed swap puts the old folder back; a run killed between the two renames is repaired by the next one (a lone `.old` with no `GenieMaps` is restored before anything else).
+
+Every rename retries on `EBUSY`/`EPERM`/`EACCES`: the harness hit `EPERM` renaming a folder written a moment earlier (an antivirus scan). A hold that outlasts the retries is a folder OPEN somewhere: Windows won't rename a folder while File Explorer, or a program whose working folder is inside it, has it or a folder inside it open (B626: Sekmeht had Explorer on the scripts subfolder). Nothing has been touched at that point, and on Windows the error says so in words (`FOLDER_IN_USE`: close the window and try again) instead of echoing `EPERM … rename`; Linux and macOS can rename an open folder, so there the raw error stays. The update does purge the managed folder, so a file the player added there is gone after an update; the toolbar tooltip says the copy is replaced. Nothing outside these three fixed paths is ever deleted, and a folder the player picked is never touched.
+
+**The zip reader is hand-rolled** (central directory + `zlib.inflateRaw` + `zlib.crc32`), no new package. The module imports nothing from electron, so the harness drives it with a fake fetch; main passes `net.fetch` (system proxy honoured).
+
+**IPC.** `genie-maps:status` → `GenieMapsStatus`; `genie-maps:install` → `GenieMapsResult` (never throws; the error is a sentence). One run at a time: a second call joins the first. Progress (`genie-maps:progress`, ending with `{ phase: 'done' }` either way) and the finished status (`genie-maps:updated`) go to EVERY window, because the folder is shared.
+
+**Renderer** ([MapPanel.tsx](../src/renderer/components/panels/MapPanel.tsx)). On `updated`, every MapPanel drops the module parse cache for that folder (`bustGenieCache`) and reloads if it is using it; the disk parse cache misses on its own (new mtimes). The panel where you clicked switches to the managed folder if it was using another one. The folder setting now reaches every open map: a change is announced in-window (`lichborne:genie-maps-dir`) and across windows by the `storage` event, so picking or downloading in one panel no longer leaves the others on the old folder until they remount.
+
+**UI** ([GenieMapView.tsx](../src/renderer/components/panels/GenieMapView.tsx)). With no folder set, the first screen is **Set up Genie Maps** (`.genie-setup`): one sentence on what the map does, ONE large button **⇩ Download and set up Genie maps** (it stays at full strength while it shows the progress), a note on size and source, and the quiet second choice as a link-style button, **Already use Genie? Pick its Maps folder instead…**. Downloading sets the shared folder, so the map loads straight from it; and a panel that finds the maps already downloaded with no folder set adopts them instead of showing this screen again (a folder the player picked is never replaced). The "no zones loaded" state offers download and **📁 Pick a different folder…**; the "waiting for game data" state tells the player to type `LOOK`. The Genie map toolbar gains a button after 📁. On the managed copy it reads **↻ Refresh maps** (Sekmeht: the latest maps are what people come back for), folding to a bare ↻ when the toolbar is narrower than 34em (`.genie-map-toolbar` is a size container; it holds no popovers, so its stacking context is harmless); the tooltip says the whole folder is replaced and gives the last-updated date and commit. On a folder of the player's own it stays a quiet **⇩**, *download and switch*, because that is not a refresh. Busy labels read "Refreshing… 62%" / "Downloading… 1.4 MB", or just "Refreshing…" for the starting/unpacking/finishing phases (`busyText`), and stay at full strength since they are the progress readout. Both overrides must beat `.map-btn:disabled` and `.map-btn:disabled:hover` by SPECIFICITY, which come later in map-panel.css (pitfall #111): `.genie-map-toolbar .genie-refresh-btn:disabled` and `.map-btn.map-btn--primary:disabled:hover` (the cursor usually still rests on the button after the click). On a folder of the player's own the busy ⇩ shows "⇩…" until there is a number. `.map-btn` sets no font-family, so WORDS on one draw in Chromium's default UI font; the refresh label (11px, like the zone list) and the empty-state buttons set `var(--game-font-family)` themselves. Don't move that onto `.map-btn`: the icon-only buttons' glyphs (▤) come out smaller in the game font. The `.map-empty .map-btn` rule covers every map empty state, so the Lich map's "Try Genie Maps" follows it too. The toolbar's 📁 opens the folder picker AT the folder in use: `browse-folder(startIn?)` home-expands it and passes it as `defaultPath` only if an async stat says it's still a directory (never a sync stat in main, which a dead network share can hang for seconds). The setup screen passes nothing, so the OS chooses. A refresh replaces the whole folder by construction (new copy built beside it, then swapped in), which is what Genie's folder structure needs; it is never a merge. While a run is going the buttons show its progress and are disabled. Failure is an error toast ending "Nothing was changed."; success a toast with the map count. The empty-state links were dead (the overlay is `pointer-events: none`) and now work.
+
+**No background checks.** It downloads when the player clicks, never on its own (the SimuCoin stance: no automated polling of someone else's service). Checking whether GitHub has a newer commit (the commits API returns the id the marker stores) is a possible follow-up.
+
+**Noticing updated maps on THIS computer (v1.1.0, Sekmeht: "both the lich db and the genie maps xml files are updated pretty regularly").** Separate from downloading: the files on disk change under a running Lichborne (Lich downloads a new `map-<n>.json`, dr-scripts rewrites `scripts/data`, Genie's own updater or a git pull rewrites a Genie folder the player picked). What is in place, all in MapPanel and all cheap checks in main, never polling:
+- **Lich's "--- Map loaded" line.** GameWindow bumps `lichMapVersion` on it. Since Lich 5.20.0 (lich-5 #1495, `map_base.rb` `map_loaded_message`) a load started by a script says `--- go2 Map loaded <file>`; the pattern only knew `--- Map loaded`, so on current Lich it almost never fired. It is now `^--- (?:\S+ )?Map loaded .+\.json$`.
+- **On showing a map view, and on window focus** (at most every 30 s): `refreshLichDbIfChanged` asks for the newest map file and its `stamp` (time and size) and reloads only if `path|stamp` differs from what is loaded; the Genie folder's `genie-cache:fingerprint` is compared with the one recorded when its zones were loaded (`genieSeenFp`, module scope; taken BEFORE the parse and stored with the disk cache, so a file changed mid-parse is re-read next time); and on the Graph map the `scripts/data` files' `lich:map-data-stamp` is compared (`loadAtlas`), so the Find list follows a dr-scripts update.
+- **The ↺ button** always re-reads Lich's map; **↻ Refresh maps** re-downloads the managed Genie copy.
+
+Two bugs fixed on the way. The Lich cache was keyed by path alone and the "Map loaded" reload FORCED a re-parse, so (with the pattern fixed) every character's login would have re-read the 15 MB map and remounted the map view for an unchanged file; the key now includes `stamp` and the reload is a compare. And the Genie load effect re-ran on every Lich reload (its dependency `dbStatus` ends at 'ready' again), emptying and re-loading the Genie maps, which on the Graph map flashed its checklist; it now runs only for a folder not already loaded, or after an error. Known cost: two open maps in one window that both notice a changed Genie folder each re-parse it (the XML path is not shared between panels, as on a cold start).
+
+**No slash command, by decision**, consistent with the rest of the Genie map work (Sekmeht): the map is the surface.
+
+**Privacy.** A plain GET to github.com with Electron's default user agent; nothing about the player is sent.
+
+### 19.20 Graph map (v1.1.0)
+
+Sekmeht's ask: a third map view that joins the two datasets, since each has what the other lacks. Genie Maps has the hand-drawn layout, room colours, notes, labels and zones. Lich's map has the game room ids, tags, travel times, links Genie doesn't draw and rooms Genie doesn't have, and Lich's `scripts/data` files say where things are. DR only.
+
+**Who decides what.**
+
+| Question | Source |
+|---|---|
+| Where is a room drawn inside its zone? | Genie only |
+| What do we know about a room? | Lich's map and Lich's data files |
+| Where does a zone sit in the world? | Elanthipedia's Zone map grid, refined by positions read off the official colour map |
+| What kind of trip joins two zones? | The data (commands and travel times); Elanthipedia's Travel map names it |
+
+**Rooms are never placed from Lich's directions.** That was the v0.6.6 Lich graph view (§19 intro), removed because it disagreed with Genie's layout. A Lich room with no Genie node is listed on the node it hangs off, with no coordinates.
+
+#### The bridge ([graphBridge.ts](../src/renderer/graphBridge.ts))
+
+Pure, harnessed. `buildGraphBridge(zones, rooms)` gives, per zone: `matches` (Genie node → Lich room and how it was settled), `extraLinks` (Lich-only links between two matched rooms), `beyond` (Lich rooms off a matched node that no Genie zone has) and `exits` (the nodes leading to other zones). Across zones: `lichToNodes` and `zoneLinks` (with the commands that cross and the quickest numeric time).
+
+The ladder, in order. A tie at any rung leaves the room **unmatched**: the view sends `;go2` for a matched room, so a wrong match is worse than none.
+
+1. **Title + description.** Same normalized title, a description in common (equal, or one containing the other at 24+ characters).
+2. **Neighbours.** Several candidates share the description: the one Lich links to the most rooms already matched beside this node wins. A link in the same **direction** counts double. Without that, two identical rooms either side of a fountain both "link to the fountain" and tie; this recovered 211 rooms.
+3. **Title with a neighbour's backing.** The only Lich room with that title and no description in common is accepted only when a neighbour link vouches for it (one link when the plain exits agree, two otherwise).
+
+**Stale copies are dropped before the ladder** (`dropStaleCopies`, from live testing). Lich's map holds some second copies of a room: same title, same description, but no game room number and no links of their own. Shard's Coin Exchange is 19280 (uid 2014102) and 19281 (neither). The copy tied with the real room, so neither matched, and the bank beside it listed the Coin Exchange "beyond the map" although Genie draws it next door. A candidate is dropped as a copy only when exactly one candidate has a game number, the copy has none, all its descriptions are that room's, and it leads nowhere that room doesn't. Two different look-alikes (identical alleys in two towns) have different neighbours and still tie; so do two rooms that both have game numbers. 19 more rooms match; the list of links between zones is unchanged (`links-ab.cjs`).
+
+**A title alone never matches.** Towns share whole buildings by name. Every Traders' Guild has an "Auction Hall", Lich had mapped only the Crossing's, and the first build matched Riverhaven's rooms to it, which drew a road from Crossing to Riverhaven and would have sent `;go2` to the wrong town.
+
+Three clean-up passes follow, each from a real finding:
+- **Double claims.** Two nodes of one zone on the same Lich room: the one its neighbours vouch for keeps it, or neither does (207 cases).
+- **Out of place.** A match whose matched neighbours are all strangers to it in Lich's links is dropped, but only when one of those neighbours is itself backed by somebody else (a stranger makes its honest neighbour look like one too).
+- **Look-alikes across zones.** A Lich room matched in several zones is kept where its surroundings vouch for it and dropped where they don't. A gate both maps draw is vouched for on both sides and stays in both.
+
+**"Beyond the map" leaves out a room Genie draws next door.** A Lich neighbour of a matched room is listed as beyond only when no Genie zone has it AND the node has no drawn arc, in the same direction, to a room of the same name that is unmatched, or matched to a Lich room this one reaches by the SAME command (one command can't lead two places, so the listed room is a stale copy whatever its description: the Shard Consulate foyer goes `west` to Silk Strings 15405 and to 12855, a copy with the room's old wording), or matched to its twin (same descriptions, and the listed one has no game number). Without that, a room on screen right beside this one was reported missing (the Shard bank's Coin Exchange; Kirm Morzindu's Observation Boxes behind each door). A matched neighbour that is only same-NAMED doesn't count: whole stretches share a name ("Prairie"), and a room truly missing from Genie must still show. `beyond-diff.ts` lists what the rule removes in a zone.
+
+Measured on Sekmeht's data (93 zones, 18,977 Genie rooms, 18,981 Lich rooms): 16,015 matched (84.4%: 14,845 by description, 1,023 by neighbours, 147 by title), 345 Lich-only links, 395 rooms beyond the maps (575 before the fixes above), 137 zone links of which Genie draws 122, built in about 280 ms. The zones that barely match are ones Lich hasn't mapped (Soul of Maelshyve) or mazes of identical rooms (Pokekehekepi's 73 "korgi" rooms), where a tie is the right answer.
+
+#### The world ([worldData.ts](../src/renderer/worldData.ts), [graphWorld.ts](../src/renderer/graphWorld.ts))
+
+`worldData.ts` is four hand-made tables, committed, nothing read at run time:
+- `ZONE_GRID`: Elanthipedia's Zone map, an 11 × 11 grid of 42 lettered squares (origin bottom-left, about 100 miles each) with the wiki map numbers in each.
+- `WORLD_PLACES`: about 70 places with a position as a fraction of the world, read by eye off Simutronics' official colour map. `kind` follows that map's label colours: city (white), town (dark), region (yellow), water (red), quest site (blue).
+- `PROVINCE_OUTLINES`: five simple polygons following the borders on the official Five Provinces map. The four mainland ones share border points, so no gap shows.
+- `WORLD_ROUTES`: the Travel map's named trips (ferries, ships, the airship, swims and their Athletics).
+
+**The pictures are not shipped.** Every official map is Simutronics' copyright, marked "commercial use forbidden" on the wiki. Only our own tables of positions are in the repo, and the world is our own drawing. Place names in the world view open their Elanthipedia page in the browser.
+
+**Genie's file numbers are not the wiki's.** Genie's "Map127 Boar Clan" is wiki map 121; wiki 127 is Raven's Point. The join goes through Lich: its map image names carry the wiki numbers ("Forfedhdar, 121, Boar Clan.gif"), so each matched room is located on its own (`locateRoom`): wiki number → a town (`MAP_PLACE`) or a grid square; failing that, a place name in Lich's `location` or the image name.
+
+`buildGraphWorld` then:
+1. puts each zone at the average of its located rooms (a map spanning two squares lands between them);
+2. puts a zone with too few located rooms between the zones it links to, when those are close together; otherwise on the **shelf** (events, arenas, the Transports hub), listed under "Elsewhere";
+3. settles each map against its neighbours (step 3b; rewritten after Sekmeht's layout review, "if multiple zones indicate the Crossing, they all belong pretty close together"):
+   - **Place.** A map named after a place (its exact name, or "X Village"; never one of the place's other spellings, since Ratha's include "Reshalia Trade Road", a road out of Ratha) sits on that place's spot and is never moved by the easing (`settled: 'place'`, `namesake`). Its rooms' average can wander a square away when the map also holds the countryside: Boar Clan's bubble sat 1.5 squares from its own name. A name more than 2.5 squares from where the rooms say is a coincidence and is ignored.
+   - **Covered place.** When a bigger map's bubble already covers the spot (Tiger Clan's spot is inside the Crossing's), the map is drawn touching that bigger map, on the label's side.
+   - **Side.** Any other small map is drawn TOUCHING a parent, chosen on the data's own positions in this order: the town it is named after ("Crossing Temple", "Riverhaven North Gate", "Shard West Gate"; up to 2 squares, so a gate road's bubble sits at its gate and its links show where it goes); a bigger linked map within 0.75 of a square, one Genie draws it beside first; a bigger map whose bubble its data puts it inside (Vineyard "at the Crossing"). The direction is the label's (covered place), else Genie's side (the parent's boundary rooms for it sit on its north edge, its east edge…), else the direction its data gave it, else an angle from the map's own id (`idAngle`, a hash). That last fallback used to come from how many maps had been placed before it, so moving one town in Zoluren moved Muspar'i Thief Passages and Shard Thief Passages too; now a correction only moves what is near it. A taken spot is skipped by turning round the parent: within 24° on the first ring or one out, then within 60° on the first three rings, then anywhere (a covered place tries 24° on all three rings first, so Tiger Clan stays north-west). Bigger parents first, so chains work out. Each side map records the map it was packed beside (`WorldZone.parent`), which the roads below use.
+
+   Before this rewrite, every "at the Crossing" map started on one point and the easing threw them out in arbitrary directions: Tiger Clan landed south-east of the Crossing, half a square from its own name; Riverhaven North Gate, known only by its grid square's centre, sat east of Riverhaven. `tmp-graph-map/review.ts` prints drift, Genie-side mismatches, name families and bubble-vs-label distances;
+4. eases overlaps: pushes are summed per round and applied together, the bigger bubble moves less (by area), a map on its own place's spot never moves, and no bubble may end more than `MAX_DRIFT` (0.055) from its true spot. The first version had no cap and threw Dunshade Manor from Riverhaven into Zoluren.
+
+**Names on bubbles.** A place with its own map has its label drawn just above that map's bubble (`namesake`), so the two can never sit apart, and the bubble's own smaller name is not drawn (no "The Crossing" over "Crossing"). Places without a map of their own (Wolf Clan, Knife Clan) keep the spot read off the official map.
+
+**Links.** `classifyLink(moves, minTime)`: all-portal commands → portal; a boarding word (ferry, barge, skiff, galley, gondola, mammoth, balloon, airship, ship) → vessel; all swims, dives and real climbs → athletics (stairs and ladders are a climb in name only); a time of 60 s or more → vessel; 8 s or more → slow; else a road. Docks and piers are not boarding words: you walk onto those (the Amusement Pier was a "boat"). When all the data knows is that a trip is long, `WORLD_ROUTES` decides what kind, and supplies the note. Genie's **Transports** map is the hub for rides: each group of joined rooms in it is one vessel, named by its room ("The Skirr'lolasu"), and its boundary rooms are its ports of call (`hubRides`).
+
+Measured: 86 of 93 zones on the land (17 by their neighbours), 7 on the shelf, 122 links (79 roads, 20 rides, 7 Athletics, 2 slow, 14 portals), no overlapping bubbles, largest drift 0.026 (Maelshyve's Fortress, beside Zaulfung), 55 ms. Every Crossing, Riverhaven and Shard map within 0.9 of a square of its town (the North Gate sits at 0.86); the remaining Genie-side mismatches are long roads (whose Genie "side" is the middle of a road), Taisgath (its label, from the official map, wins), and tiny maps.
+
+#### Placing towns with Sekmeht (the world review)
+
+The world was reviewed region by region against pictures Sekmeht supplied: the five sepia province drawings, the older "Ports of Call" map, the 2015 colour map and the Five Provinces border map, plus Elanthipedia's Cities and Geography categories. Each round was rendered with the real components and real data and shown on a review page (`tmp-graph-map/shot/review.html`, re-rendered by `review.sh`). **Every direction a picture gave became a harness check**, so a later change can't move a town back (`world.ts`, "Sekmeht's … drawing").
+
+How the sources rank, from what they disagreed on:
+- **The game's own data and the wiki grid outrank a province drawing.** The drawings are pictures, not surveys. The Ilithi drawing puts Chyolvea Tayeu'a far west of Shard; the Genie "Shard to Gondola Area" map puts its 34 rooms north-east of Shard's gates near the gondola, and the colour map and grid agree, so it stays east.
+- **The wiki decides what a place IS** (Sekmeht). Tref Bain and Tref Dinta were one entry. Tref Bain is a Qi'Reshalian island off Leth Deriel's east coast, closed to outsiders past its port Landfall; it is drawn as an island north-east of Acenamacra, north of Pi'Qanah, placed from the wiki's wording because no map shows the spot. Tref Dinta is the Zoluren town just south of Leth Deriel on the Southern Trade Route, right at the Ilithi border (Sekmeht; Lich files its rooms under Zoluren), and its Genie map now sits on its own name. No `Landfall` alias: names are matched by "contains", and the Crossing has a Landfall Jetty.
+- **The Ports of Call map only fills gaps.** It was lined up with the world by a least-squares fit on 17 shared towns: everything within two-thirds of a square (Langenfirth 0.66, Arthe Dale 0.53, the rest less). Its water and region names were added at the fitted spots, then moved off any land they fell on.
+
+What moved:
+- **Zoluren** (the drawing): Wolf Clan west of Tiger Clan and a little north; Tiger Clan west-north-west of the Crossing, under the Crossing's bubble so its map is still drawn beside the West Gate; Knife Clan further west; Kaerna Village just north and a little west of the Crossing, Dirge north of it; Stone Clan north-east with Arthe Dale below it; Leth Deriel a touch west.
+- **Therengia** (the drawing): Greater Fist due south of Riverhaven; Sicle Grove south-east of it, east of Greater Fist. The rest already matched, as did Qi'Reshalia.
+- **The Zoluren coast comes in on two inlets** (Sekmeht): Segoltha Bay reaching toward the Crossing between Arthe Dale and Silverclaw Hub, and the Bay of Nenashyo by Leth Deriel, with Acenamacra (and its dock) on its shore and Twinsoul Bay at its southern end; the bay's south shore is Ilithi's coast. Checked: each bay is in the sea, the sea is just east of Acenamacra, and the inlet reaches in between Arthe Dale and Silverclaw Hub.
+- **New names:** Bay of Nenashyo, Twinsoul Bay, Faldesu Delta (at the river's mouth, beside a moved Faldesu Bay), Sawstwar Lake, and the Dragon's Spine (the mountains the gondola crosses). Six more from the Ports of Call map wait (Wingtip Cove, Whitewing Bay, White Cove, The Wolf's Maw, The Brine Mare, The Neck): they fall inside Ilithi's outline, so that coast needs the same reshaping first, and there is no picture of it to trace.
+- A few labels were nudged off others they overlapped (Sicle Grove off Riverhaven East Gate, Arthe Dale off Sorrow's Reach).
+
+Of the wiki's 65 cities, 39 are on the world. The rest: the seven Albarian cities (another continent, not drawn), places that can't be visited (Su Helmas, the destroyed Mir'Kazeril), three inside maps already placed (Vela'tohr Valley in the Boar Clan map, The Enclave in Hara'jaal, Jeihrem's Burrow with Basalt Isle), and a dozen with no room in Lich's or Genie's data (Nenav Dalar, Karadel, Gardul…). "Sunfell Hub" is most likely Sunfall Hub. Knowledge.md has the facts.
+
+#### Roads, not links
+
+Every link at once was "a bit of information overload" (Sekmeht): 108 lines, a ring of spokes round every city and long boat lines over the land. `worldRoads` ([graphWorld.ts](../src/renderer/graphWorld.ts), pure, harnessed) groups the links by **stop**. A stop is a map with no parent, or one named after a place (`stopOf` follows `parent` up and stops at a `namesake`: Tiger Clan is its own stop though it is packed beside the Crossing). So the Crossing's stop holds its gates, tunnels, temple and Northern Trade Road.
+- A link inside a stop is **local**: drawn faint, and only from zoom 1.5 (when town names appear).
+- A link between stops is a **road**, one line per pair of stops and kind, bold and round-ended, drawn between the two stops. A slow road beside a walking one between the same stops is dropped (the walk is the road); a swim stays, as a shortcut.
+- A boat is one thin, faint, dashed **curve** per pair, bowed to one side, so it reads as a trip over water rather than a road through the land.
+- **Links to event maps are not roads** (`quest` places: Hollow Eve at Andreshlew). The festival map is joined to the Crossing by an ordinary exit, and drawn as a road it ran straight across the sea.
+
+Result: 30 roads and 17 boats instead of 108 lines; 54 local links. Pointing at a map still draws all its own links at full strength, portals included.
+
+#### Layers and the key
+
+A **⚙** in the bottom-right corner with the panel's A−/A+ (both views since v1.1.1; first a Layers ▾ button on the bar) opens a checklist, upward. Seven or more chips would overflow the bar, which must keep one size (pitfall #170). The list wears the Find dropdown's chrome (one shared rule, pitfall #113), hangs from the right, and is a module-level component (UX #4). Arrows move, Space toggles (handled there, or the type-anywhere handler takes it, pitfall #165), and Esc closes it with `preventDefault` so the Maps window behind stays open (pitfall #141).
+
+| Layer | What it draws |
+|---|---|
+| Roads | roads between stops, and the local links when zoomed in |
+| Boats & rides | boats, and portals on hover |
+| Side maps | the maps that aren't stops. Off leaves the towns and big maps; a side map you're in, or one Find lights, still shows |
+| Town names | place labels. Off, a map named after a town shows its own name instead |
+| Map names | each map's own name under its bubble, from zoom 3 |
+| Water & regions | sea, lake, bay and region names |
+| Provinces | the province colours, borders and names; off draws the land in one plain colour, so the coast still reads |
+| Key | the key along the bottom; off gives the map that space |
+
+All on by default. Saved per character as `graphMapPrefs.world`; `coerceLayers` reads each layer on its own, so a missing or broken value is ON and a layer added later starts on for everyone (pitfall #121). The button shows the count when any are off ("Layers (5/8)").
+
+**Hover follows the layers** (Sekmeht): pointing at a map draws only the kinds whose layer is on, and never a line to a side map the Side maps layer hides. The room card still lists trips in words.
+
+**The key explains the circles as well as the lines** (Sekmeht: "what is the circle sizes about?"). A map bubble's size grows with its rooms (`radiusFor`: 0.0045 + 0.0007 × √rooms) and its colour is its province; an island is land drawn as a circle, with its town's map on top; the green rings are you. The key's samples are drawn with the map's own classes in screen pixels, then a hairline, then the line styles. Each item explains itself on hover.
+
+**Contrast, measured on every theme** (`tmp-graph-map/contrast-world.ts`: resolves `var()` chains and `color-mix()` as the browser does; a label's background is its `--map-bg` halo). Map names and the key's text were lifted partway toward `--map-text` (they used the theme's muted text alone, 2.44:1 on Thief), and the region gold deepened (2.74:1 on Parchment). Every world-view text now reads at 3:1 or better; the lowest are Thief's, whose own muted and secondary text are that low everywhere.
+
+#### What is where ([lichMapData.ts](../src/main/lichMapData.ts), [graphAtlas.ts](../src/renderer/graphAtlas.ts))
+
+Main reads seven files from `{Lich}/scripts/data` (IPC `lich:map-data`; the folder is composed in main): `base-town`, `base-hunting`, `base-forage`, `base-shrines`, `base-mining`, `base-lumber`, `base-athletics`. Each becomes `MapDataRow`s (a category, a name, Lich room ids, an optional town and note). Stealing, crafting and picking are left out: item lists, not places.
+
+- Loaded with the YAML 1.1 schema and the merge tag (pitfall #201): Ruby files with anchors, `<<` merges and `19_242`-style numbers.
+- Every reader takes `unknown` and keeps only the shapes it knows. A new key costs that entry, a broken file costs its category, and a **missing** file and a **broken** one are reported differently (pitfall #197).
+- Hunting rank ranges live in comments, which a YAML parser drops, so `commentRanges` reads them from the raw text (326 of 370 grounds).
+- Cached in main by each file's size and time. Read-only; Lichborne writes nothing there.
+- **Updates are picked up while running.** The files' sizes and times are one stamp (`lich:map-data-stamp`), compared when a map view is shown, when both maps finish loading, when Lich says "Map loaded", when the window regains focus (at most every 30 s), and when the player clicks into the Find box; only a change re-reads them. Lich syncs these files from its repository as a session starts, which can be after the map read them (Sekmeht: new hunting grounds arrive that way), so the Find box check is the one that matters: the data is current as of when you start typing.
+- **↺ is the resync (v1.1.0, Sekmeht: "not realtime… just a resync button").** It re-reads Lich's map forced past the cache; on Genie Maps and Graph it also drops the Genie maps' in-memory copy and loads them from main's disk cache (re-parsed only if the folder changed). The forced Lich map is a new object, so the data files are re-read and the two maps re-matched after it, in that order. Disabled while either map is loading. There is deliberately no wait at startup for Lich to finish syncing.
+- **Not read yet: Lich's `scripts/data/custom/` folder** (lich-5 #1431, Knowledge.md). A player's own copy of a data file there replaces the standard one for their scripts, so Find can show places their scripts don't use. Reading it means checking `custom/` first for each file and adding it to the stamp.
+- Other data files name rooms too (herb and supply shops, theurgy, crafting halls, art, stealing; Knowledge.md). Left out by decision (Sekmeht: the seven cover what people look for). If one is ever added: a new reader in `lichMapData.ts` and a category in `graphAtlas.ts` (labels and sort order are `Record`s, so tsc flags a missing one); shop items as ONE thing across towns so Go walks to the nearest shop, with the town and price as a per-room note.
+
+`buildAtlas` merges those rows with the Lich map's own room `tags`. A tag naming the same thing as a forage or hunting row folds into it. With no data files the atlas is the tags, and still works. On Sekmeht's data: 1,141 rows, 2,005 things, a search in under 1 ms.
+
+`travelTimes` is a shortest-path sweep over Lich's links and times (about 22 ms for the world). It only RANKS: which of a found thing's rooms is nearest, for **Go**. A link whose time is a Ruby snippet (boats, portals, premium, guild or quest routes; 98 `timeto` strings plus `;e` moves) can't be worked out without a script engine. Left out, they cut whole regions off: from the Storm Bulls the sweep reached 11,380 of 18,981 rooms and no Adan'f ground, so Go was greyed out (Sekmeht, live). Go therefore passes `scriptedCost: 30`: each such link counts as 30 s, and the same sweep reaches 16,469 rooms with Adan'f about 105 s away. `go2` runs the scripts itself, so this only decides WHICH room to send it to. A link Lich marks closed (`null`) stays out either way. Go also passes `stopAt` (the thing's rooms): rooms come off the queue nearest first, so the search stops at the first of them it reaches, which IS the nearest. It ran a full sweep of the world on the window's thread each time you stopped moving with Find on (about 22 ms; the second bug check). `atlas.ts` checks the early stop picks the same room as the full sweep.
+
+**Travel time was removed during testing** (Sekmeht: "the travel time button isn't very accurate"). The first builds had a second lens that coloured each room by seconds from you, in seven bands. Lich's `timeto` numbers are rough, so as seconds on screen they misled. As a ranking they are what `go2` itself walks by, so Go keeps them. A saved `lens: 'time'` loads as no lens.
+
+**Go** (on Find's chip): `;go2` to the found room, or the nearest one when there are several, through the echoing send, stopping a running Genie walk first, as right-click does. Every one of the thing's rooms counts, drawn on a Genie map or not (`go2` finds its own way). Disabled with a reason without Lich, while matching, when you're standing in one, when Lich doesn't know where you are (no starting room to rank from), or when Lich's map has no route from your room to any of them (`noRoute`; these two used to share the "move or LOOK" message, which was wrong for the second). The footer names the nearest room by its Lich title.
+
+#### The views
+
+- [MapPanel.tsx](../src/renderer/components/panels/MapPanel.tsx): `viewMode` `'combined'`, button **Graph**. Not stored as `'graph'`: that word belonged to a view removed in v0.6.3 and old saves holding it still migrate to `'genie'`. The bridge, world and atlas are built once per app (module caches keyed by the identity of the shared Lich and Genie maps, in-flight promise kept, pitfall #159) and only when the view is asked for.
+- **Opening a map: one set of camera rules (v1.1.1, Sekmeht: "standardize the experience").** Every way of opening a map (the zone list, a world-view bubble or "Elsewhere", an exit marker) goes through GenieMapView's `openZoneRef`:
+  - **Your own map:** your level, following you, centred on you at your zoom. Already showing it: it re-centres on you, like ◆.
+  - **Any other map:** its lowest level. On the Graph map it keeps your zoom and centres on the room nearest the map's middle (`centerZoneKeepScale`; the middle itself can be empty space); the very first map you ever open, before any zoom is known, is fitted (`zoomKnownRef`: a zoom carried over from an earlier mount, or a scale change since this mount; not `persist.scale`, which an effect writes from the default on the first render, so the first check never fitted anything). The plain Genie Maps view still fits it. An exit marker to another map keeps its own better rule: your zoom, centred on the room you'd arrive in.
+  - **⊡** fits the whole map; **◆** takes you back to yourself.
+  - **A map with no size yet** (the zone view just mounted, e.g. coming from World) is framed when its size arrives (`frameLaterRef`, run by the SVG's ResizeObserver). Before this the camera stayed at 0,0, off to one side of the map, and it never retried, on both maps.
+  - Keeping your zoom instead of fitting is under trial with Sekmeht; going back is the `else if` in `frameNowRef`.
+- **Several characters (verified v1.1.0, Sekmeht's ask).** Shared by every character in a window, one copy each: Lich's map (per file), the Genie zones (per folder), the bridge and world (per pair of those), the atlas (per map, install and data-file stamp). Per character: `graphMapPrefs` (level, Find, toggles, layers), the zone on screen, the marker match, the route ranking for Go, the room card and the drawn map. Each window has its own copy (separate renderer processes). Two fixes came from checking it (B629): the Lich cache held one map for the whole app, so a DR and a GS4 character evicted each other and every Maps overlay opening re-parsed the file (now one entry per file, older files in the same folder dropped); and a new copy loaded by one panel (↺, or a Genie change the first panel noticed, after which the shared fingerprint told the others nothing had changed) stayed with that panel only. A parse now announces itself (`lichborne:map-data-loaded`) and the other panels take the new copy, so all characters see the same maps and the old copy can be freed. A panel takes one thing per announcement and checks again each time it finishes loading: a ↺ announces Lich's map and then the Genie maps, and a panel still taking the first isn't ready for the second when it arrives. The bridge and atlas caches stay single-slot: they are DR-only, so only two DR characters on two different Lich installs would rebuild them in turn.
+- **An add-on over two maps (Sekmeht).** Graph is usable only when Lich's map (`dbStatus` ready) AND the Genie maps (loaded, at least one zone) are both on this computer (`graphUsable`). Until then the button wears `map-btn--locked` (muted text, dashed border; not opacity, pitfall #150) and its tooltip names what's missing, but it stays CLICKABLE: the click opens `GraphNeeds` (module scope in MapPanel), a checklist with one row per map saying whether it's there and the one action for it (Lich Setup…, opened from the map at the wizard tier, then a retry of the Lich map; ⇩ Download Genie maps or 📁 Use a folder…). A disabled button could only explain itself on hover. With `viewMode` still `'combined'`, the view becomes the Graph map by itself once both are found, and a Genie reload shows the checklist's "Loading" row meanwhile. `GraphMapView` therefore never mounts without both maps, so its bar is never shown over the Genie setup screen with a Find box stuck on "reading". The three cases: no Lich and no Genie maps → both rows open; Lich only → Lich ✓, Genie row offers the download; both → the Graph map. A direct connection is not a missing piece: everything but Go (`;go2`) works without Lich running, and right-click falls back to the Genie walker. The Lich Map's own empty states point the same way (Lich Setup…, Open Genie Maps; ↺ Look again when the map file is missing).
+- **A new player** (Sekmeht's walkthrough, every platform). Without Lich only Genie Maps is ready; with Lich the Lich Map is, and Graph follows once the Genie maps are downloaded (its checklist has the download, then becomes the Graph map by itself). So:
+  - **The Lich Map button is greyed (`map-btn--locked`) whenever Lich's map can't be found**, like Graph, and stays clickable: the click shows why and offers Lich Setup and the Genie map. A direct character on a computer that HAS Lich keeps both maps (Sekmeht's choice); only Graph's Go needs Lich running.
+  - **"Lich isn't here" is told apart from "no map file yet".** The default Lich path is never blank (`C:\Ruby4Lich5\Lich5\lich.rbw`, `~/Lich5/lich.rbw` on macOS and Linux), so a computer without Lich used to read "Lich's map file wasn't found… map-*.json". `find-lich-map-file` now answers `{ missing: 'lich' }` when neither the configured file nor a `lich.rbw` beside it exists (checked in main, `~` expanded), and that shows as "The Lich Map needs Lich" (`no-lich-path`).
+  - **A character that has never picked a view starts UNDECIDED** (`viewMode` null, never saved) and gets one when Lich's map settles: the Lich Map if it loaded, else Genie Maps. It used to save the Lich Map on first mount, so "never picked" couldn't be told apart and a player without Lich opened on an error. A saved choice always wins; GS4 is still forced to the Lich Map.
+  - Checked by rendering the real MapPanel in each state (`tmp-graph-map/perf/shot.sh` with `nolich=1`, `nogenie=1`, `mode=new`).
+- [GraphMapView.tsx](../src/renderer/components/panels/GraphMapView.tsx) holds what the player chose and builds the overlay.
+- **Layout: one bar, one footer** (the v1.1.0 UI pass; Sekmeht: "this area seems very cluttered"). The first build stacked four rows of controls above the map (five in a narrow panel): the map switcher, the Graph bar, the Genie toolbar and the Genie subbar. The location appeared three times, the folder and Refresh buttons sat in prime space, five things were lit gold at rest, and status text and a link were wedged among the buttons. Now:
+  - The **bar** is **one row: which map** (World/Zone, the Genie map's zone list, ◆ ⊡ ▤ and levels; GenieMapView portals them into `overlay.navSlot` when `overlay.embedded`). v1.1.1 took everything else off it so a narrow panel (Sekmeht's ~345px) gets its rows back: **finding things** (the Find box, the found item as a chip, **Go ▸**) sits in the **footer** ahead of the status line, and its list opens upward; the **layers** are a **⚙** (both views) on top of the panel's A−/A+ column in the bottom-right corner, with a dot when one is hidden, like an Experience tab's ⚙. Docked, it is rendered INTO that column (a portal into PanelFrame's `.panel-font-controls`), so it takes the column's width, gap and faintness exactly; the first version floated beside the column and guessed its height, and came out narrower and out of line. In the Maps window, which has no A−/A+, it floats in that corner on its own. The footer's status reports only what Find found and the "matching…" messages: the place name and "Lich knows N of M rooms" went, so Find has the room (Sekmeht). History: v1.1.0 had two bar rows (one wrapping row had put Go on the next line, away from its chip), with "Show" chips on row 1, briefly a Layers ▾ button. The zone list shrinks before the row wraps (`.gx-nav` is `flex: 1 1 0` with a 210px floor, the list at least 7em), so 345px is one row.
+  - **The bar is the same width in every zone** (Sekmeht: "the Z0 and Z1 cause the map fields to all resize"). The level chips appearing in a zone with levels used to push the right-hand control onto a second row, so the map got shorter each time you walked into such a zone. Embedded, a one-level zone keeps the chips' place (`map-level-chips--placeholder`, hidden), the group never wraps inside, and a Genie walk's status ("→ room n/total ■") is drawn in the footer instead of the bar. Only the three zones with 4–7 levels are wider. Pitfall #170.
+  - The **footer** holds everything that reports, as the Genie map's own footer does: place name, room count or Find results, and a Genie walk in progress. (An Elanthipedia link sat at its right in the first builds; removed at Sekmeht's ask. World place names still open their page.)
+  - Embedded, the Genie map draws no toolbar, subbar or footer of its own. The folder and Refresh buttons stay on the Genie Maps view (managing the folder isn't this view's job).
+  - **The plain Genie Maps view got the same treatment, at Sekmeht's ask.** Its toolbar is ONE row: 📁, Refresh maps, the zone list, then ◆ ⊡ ▤, the level chips and a walk's status at the right as one unit (a narrow panel wraps the unit whole). The subbar is gone, and so is the "📍 here" text (it repeated the zone list, and its pin matched nothing drawn on the map). The "Refresh maps" label folds to ↻ under 46em (was 34em) so the row folds before it wraps. `same.ts` cuts the toolbar from both markups and checks the new row separately; the canvas is still held to the last commit.
+- **The room card (hover), both maps** (Sekmeht: "it just looks like a blob of text"). It was one stack of same-weight lines with the labels buried in them. Now: the name, then "Map 67: Shard · Room #82" muted; then ONE two-column grid (so every value starts at the same column) of small uppercase labels and values, in up to three blocks split by hairline rows: the Genie facts (Type with its swatch, Aliases, Exits), Lich's facts (Lich, Here, Beyond; Graph map only), and the clicks (Left-click / Right-click, muted). `GenieOverlay.hoverLines` returns `{ label, text }[]` for that, and `walkHint` only the right-click text. Classes `.genie-card-*` in map-panel.css, all from the map's theme vars; checked on Classic Light (`perf/shot.sh … hover=1`).
+- **The zoom is kept.** Picking a Find result used to fit the whole map, which on a big map zoomed far out (Sekmeht: "the zoom resets to zoomed out pretty far… it just needs to remember the zoom level"). Picking now leaves the view alone; ⊡ fits on request. And the zoom (`scale`) rides MapPanel's per-character persist record beside the zone and level, so World → Zone and a switch between map views come back at your zoom; centring on you keeps it, and only opening a zone you're not in fits it.
+  - The layer toggles are quiet: a tick and plain text when on, muted when off, never colour alone. The accent is left for what you are looking at (World/Zone, follow, the level).
+  - Every control on the bar is one height, whichever component drew it (`.gx-bar .map-btn`).
+  - Two rows above the map at any normal width (one more on very wide panels than the one-row first build, the price of never splitting a group).
+- [GenieMapView.tsx](../src/renderer/components/panels/GenieMapView.tsx) takes one optional `overlay` (`GenieOverlay`). Absent, it renders character for character as before (checked against the last commit's markup for four zones and the setup screen). Each layer is its own memo outside the node layer (pitfall #106). The lens fades the rest of the map with **one veil rectangle**, not a class on a thousand rooms (pitfall #126). Nothing animates.
+- [GraphWorldView.tsx](../src/renderer/components/panels/GraphWorldView.tsx) draws the world. Label sizes are screen pixels off the panel font, divided by the scale, so they follow the font setting and hold their size while you zoom. Portals are drawn only for the zone you point at. Your zone gets two still rings plus the same expanding "you are here" ping as the Lich and Genie maps (Sekmeht: all the maps should agree). It is the shared `genie-here-ping` with its own keyframe, `gx-here-ping`, reaching 1.8× instead of 2.7×: the other maps ping round a small dot, this one round a whole bubble, and 2.7× washed over the neighbouring maps. Epilepsy safe mode stops it through the shared rule, and the minimize pause covers it like every animation. It is the only animation in the world view.
+
+#### Zoom and start-up (the v1.1.0 bug check)
+
+Sekmeht: "the zoom in and zoom out is very glitchy", then "it seems better now, maybe there's some startup that takes a while?" Both were right. Measured with `tmp-graph-map/perf/` (the real MapPanel on the real data in an offscreen window, wheel bursts, every frame recorded; production React):
+
+| | Before | After |
+|---|---|---|
+| Longest unbroken start-up work | 55–60 ms (bridge indexing), plus 40 ms (world) and 30–100 ms (atlas) unsliced | under 11 ms |
+| Frames over 34 ms from opening the map (3.5 s) | 4: 405, 67, 50, 50 ms | 1: about 300 ms, as on the plain Genie map (250–270 ms) |
+| Zooming once ready, with or without a lens | 60 fps, except 33 ms frames with a lens on | 60 fps |
+
+What changed:
+- **Start-up is time-sliced** ([timeSlice.ts](../src/renderer/timeSlice.ts)). The bridge, world and atlas builds are generators that `yield` at cheap checkpoints. `runSliced` hands the thread back about every 8 ms, and `runSync` runs the same steps straight through for the harnesses. `tmp-graph-map/slices.ts` fails if any slice exceeds 12 ms.
+- **Timers, not `scheduler.yield()`.** Measured in Electron 45, `scheduler.yield()` continuations ran ahead of rendering: the slices went back to back and the window froze for about 400 ms. A zero-delay timer gives frames out (pitfall #203).
+- **The atlas merge was quadratic.** Each forage item checked an array for each of its thousand rooms; it uses a set now (100 ms to about 25 ms).
+- **The world view zooms the Genie map's way.** A native, non-passive wheel listener (React's `onWheel` is passive, so Ctrl+wheel zoomed the whole window), events folded into one update per frame, and the same 1.15 step per notch. The first version applied 1.2 per event, so a touchpad sending several events a frame jumped.
+- **Label halos are sized in screen pixels.** A `stroke-width` in CSS is in world units inside the scaled group, so at full zoom the halo grew to about 30 px and swallowed the name.
+- **Bubbles grow slower than the map** (`BUBBLE_GROWTH` 0.35): zoom in 4× and the distances grow 4× while a bubble grows about 1.6×, so zooming spreads the maps apart instead of filling the screen with overlapping discs. From zoom 3 each bubble carries its map's name.
+- **The lens's dimming veil covers the map, not 200,000 units.** The pan group is its own compositor layer, and a giant veil made that layer, and its re-raster on each zoom step, as big as the veil.
+
+Left alone, measured: the first frame (about 300 ms) is loading Lich's 14 MB map file and the Genie zones, the same on the Genie map, and predates the Graph map.
+
+**Second round, from live testing** (Sekmeht: "zoom is extremely glitchy again… in one zone it's not doing it, walk to the next zone and it does it… 67 Shard is fine, 66 Shard to Gondola is laggy"). The offscreen harness couldn't see it, so `perf/gpu.js` runs the same page in a visible window with a DevTools trace and the page's mouse parked over the map. Zone 66 zoomed at about 250 ms a frame on both the Graph and the plain Genie map. Almost all of it was text shaping: about the same number of calls as in the Crossing, but about 830 µs each against 19 µs. Bisecting with injected CSS found the lumberjacking axe glyph (§19.17.7, pitfall #204); with icons drawn as paths, zone 66 zooms at a steady 16.7 ms on both maps. The same trace showed two smaller costs, now fixed on both maps:
+- **Hover during a zoom.** The map slides under a still pointer, so each room fired the hover handler, which measured the map (a forced layout) and re-rendered with the room card. Hover is now ignored while the wheel turns (`zoomingRef`), the card is cleared when a zoom starts, and the wheel measures the map's position once per burst.
+- **The mouse re-test.** After every zoom step Chromium re-checks what is under the cursor, a search through every room of the zone (about 9 ms a frame on a big one). While zooming, a transparent `genie-zoom-cover` rect sits on top, so the search stops at it. It is rendered only while `zooming`, so the map at rest is unchanged.
+
+Not changed: the "you are here" ping animates `transform` on an SVG circle, which Chromium can't hand to the compositor, so it re-lays itself out every frame and the mouse is re-tested (about 2 ms a frame while the pointer is over the map, on both maps). Keeping the ping running is a standing v0.20.5 decision.
+
+**Your marker is placed by room number only** (`roomByNumber` in MapPanel: the game's uid, then Lich's own id). MapPanel's `currentRoom` also falls back to a title-and-description guess, which is right for the Lich map but would let a guess overrule the Genie map's own matching here. When the number isn't known or isn't matched, the Genie resolver runs as always. **A Lich-id hit must also have the room's title** (the second bug check): an unmapped room's game number can equal some other room's Lich id, which put the marker in another town and ranked Go from there. With `display_lichid` the number is this room's own id, so its title always agrees. **A room drawn on two maps** takes the copy on the map on screen first, then the last exact match's map: the Genie view may have followed you to the new map while room numbers weren't arriving.
+
+**Right-click.** On a character connected through Lich (`useSessionUsesLich`, a context beside the session's Lich path), a matched room sends `;go2 <Lich id>` through the echoing send, and a Genie walk already running is stopped first. Anything else falls through to the v1.0.2 Genie walker. The room you're in is never a `;go2` target: `walkTo` hands it back to the Genie map, whose own check does nothing (it used to send a useless `;go2` and stop a Genie walk). The walk is Lich's; Lichborne only asks for it (Principle #2).
+
+**Beyond markers.** A room with rooms beyond the map gets a frame and a small count badge sitting ON its top-right corner, both in one colour. The first version centred the badge on the corner point, which put it in the gap between four rooms (Sekmeht: "it's a little hard to see which room they're supposed to be on").
+
+**Settings and saving.** World or zone, the lens, the thing being looked for, the zone view's two toggles and the world view's eight layers (`world`) are per character under `scopedKey('graphMapPrefs')`, written only on a change, and travel with Transfer's Panel View Preferences. A new optional key: no profile version change.
+
+**The checklist reads "Loading" for a Genie folder that is set but hasn't started loading** (the load effect runs just after Lich's map settles). It read "Not set up yet", with a Download button, for that one frame.
+
+**No slash command and no Settings rows, by decision**, the same call as the rest of the Genie map work (Sekmeht): the map is the surface.
+
+**Harness** `tmp-graph-map/` (machine-local, real modules, real data): `test.ts` (bridge, 43), `world.ts` (tables, layout, the review's directions, the coast and the roads, 727; `--roads` lists them), `atlas.ts` (data files, atlas, route times and the early stop, 46), `same.ts` (the plain Genie map's markup against the last commit, 11; zones without tool rooms, since the icons changed), `contrast-world.ts` (every world-view text on every theme, and any CSS var no theme defines), `slices.ts` (the longest unbroken stretch of start-up work), `links.ts` and `pair.ts` (print every zone link, and the rooms behind one), `zoneinfo.ts` (what a zone draws, and a Lich room to stand in it), `reach.ts` (whether Go can rank a found thing from a given room, on the real atlas), `why.ts` (why a Genie room did or didn't match), `beyond-diff.ts` and `links-ab.cjs` (what a bridge rule changes), `shot/` (screenshots of the real components, with `wheel=N` to zoom first, `layers=` to start with layers off, `menu=1` to open the Layers menu, `type=`/`down=` to type into Find and press ↓ (the `find-list*` shots), and `panel=1` to dock the map in a real panel body with PanelFrame's A−/A+ column (`probePanel=1` prints the column's buttons, `hover=1` points at the panel first); `review.html` + `review.sh` is the world review page), `perf/` (start-up and zoom frame timing; `trace.js` for a CPU profile of start-up; `gpu.js` + `gpu-read.cjs` + `shape-count.cjs` for a visible-window trace, with `css=` to inject a rule and `title=` to place the plain Genie map; `icons.js` renders the tool icons large).
+
+**Known limits.**
+- Place positions were read off the colour map by eye, and the wiki calls its grid "player observation". It is a picture of the world, not survey data, so "N zones away" is labelled as the wiki's count.
+- About 16% of Genie rooms have no Lich match. There the marker uses the Genie resolver and right-click uses the Genie walker.
+- A third of matched rooms have no map image in Lich's data and take their zone's place in the world.
+- The Find list's height is bounded by the window, not by a very short panel. Its WIDTH is fixed (41em at its own 11px, four columns: name, detail, kind, rooms; the kind column fits "Hunting ground" in the game's monospace font, trimmed with "…" and whole in the row's tooltip, Sekmeht), capped at the room to the map's right edge so a narrow panel can't cut it off; ↓ ↑ keep the highlighted row in view by setting the list's own `scrollTop` (never `scrollIntoView`, pitfall #109).
+- Ilithi's south-east coast is still a block: six Ports of Call names wait for it to be reshaped (see "Placing towns").
+- Two map panels open when the Genie folder changes each re-read the XML. Only the disk-cache fast path is shared between panels, and a changed folder doesn't match the cache. Older behaviour (two characters connecting together on a fresh install do the same); fixing it means sharing the XML parse too.
+- `genieViewProps` is a new object each MapPanel render, so `GraphMapView`'s `memo` never holds. Left: the folder handlers it carries are plain functions too, and the map re-renders on every room change anyway.
+
+### 19.21 Da'Maps View (DaMapsView) *(experimental)*
 
 A third map mode, beside Lich Map and Genie Maps. Files: [DaMapsView.tsx](../src/renderer/components/panels/DaMapsView.tsx), [damaps/damapsWorld.ts](../src/renderer/components/panels/damaps/damapsWorld.ts) (loads and fills in the map), [damaps/daMapsData.ts](../src/renderer/components/panels/damaps/daMapsData.ts) (types, tag reading, outlines, the forage capture), and the converter in [tools/damaps/](../tools/damaps/). The name lives in one constant, `DA_MAPS_NAME`.
 
@@ -4256,7 +4553,6 @@ The file keeps rooms as `[id, lich id, x, y, fill, marker target, title]`, lines
 |---|---|
 | World map (F13) | Continuous multi-zone SVG — the Lich-native layout already runs over the entire reachable graph in principle; F13 reduces to raising `DEFAULT_HOPS` past the practical visual limit and adding zoom-aware culling so the hairball stays usable. Spec in §25.8 Phase 2. |
 | Exit stubs | Draw short stubs from room edge rather than center-to-center (Genie convention); cleaner at high zoom |
-| Configurable walk delay | 600 ms/step is hardcoded; expose as a setting |
 | Room notes / bookmarks | Player-added per-room annotations persisted locally |
 | Diagonal walls (one-way arrows) | Lich `wayto` is directional; render arrowheads on edges where the reciprocal entry doesn't exist |
 | Seed-conflict reconciliation | When two Genie nodes seed the same Lich room (or vice versa), the layout currently picks the first; a deterministic tiebreaker on confidence chip would be clearer |

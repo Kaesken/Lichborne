@@ -37,6 +37,9 @@ export const CONTRIBUTORS = [
   // Promoted from TESTERS in v0.20.4 (Sekmeht). No item logged in BUGS.md
   // under this name yet, so the tail of the volume ordering.
   'Crobin',
+  // Promoted from TESTERS in v1.0.2 (Sekmeht). No item logged in BUGS.md under
+  // this name yet, so beside Crobin at the tail of the volume ordering.
+  'Damiza',
   // Tysong ≡ Horibu (see the identity notes above). Listed as a DEVELOPER in
   // the README's credits and as a contributor here, by Sekmeht's choice
   // (v1.0.0): keep both when re-sorting.
@@ -46,7 +49,7 @@ export const CONTRIBUTORS = [
 // All still at zero logged reports, so alphabetical is the stable order here —
 // there is no volume to sort by until someone files something.
 export const TESTERS = [
-  'Cirostar', 'Damiza', 'Tirost', 'Wilhellm',
+  'Cirostar', 'Tirost', 'Wilhellm',
 ]
 
 // The project's home at the Elanthia-Online org (v0.20.4, Sekmeht). Used only by
@@ -70,3 +73,11 @@ export const ABOUT_BLURB =
   "It's been a joy to work directly with folks from all walks to build a game " +
   'client rooted in a love for DragonRealms — for the GMs and staff who make it ' +
   'such a wonderful game, and for the vibrant Lich community.'
+
+// Whose work the maps stand on (v1.1.0, the Graph map). The room layouts are
+// the Genie maps team's; room knowledge is Lich's map and the dr-scripts data
+// files; the world's layout follows Elanthipedia's Zone map and Travel map and
+// the Ranik maps they index. No map picture is bundled with Lichborne.
+export const MAP_CREDITS =
+  'The maps stand on the work of the Genie maps team, the Lich and dr-scripts ' +
+  "map keepers, and Elanthipedia's Zone map, Travel map and Ranik maps."

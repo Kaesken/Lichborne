@@ -1132,3 +1132,46 @@ export interface SimuCoinStatus {
   nextAt: number | null
   checkedAt: number
 }
+
+// ── Genie maps download (v1.0.2) ──────────────────────────────────────────────
+// The Lichborne-managed copy of GenieClient/Maps in `{userData}/GenieMaps`
+// (main/genieMapsDownload.ts). `commit` is the archive's commit id when the
+// zip carried one; `maps` counts its top-level Map*.xml files.
+export interface GenieMapsStatus {
+  dir: string
+  installed: boolean
+  commit: string | null
+  installedAt: number | null
+  maps: number | null
+}
+export type GenieMapsProgress =
+  | { phase: 'download'; received: number; total: number | null }
+  | { phase: 'extract'; done: number; total: number }
+  | { phase: 'replace' }
+  | { phase: 'done' }        // sent by main after every run, ok or not
+export type GenieMapsResult =
+  | { ok: true; status: GenieMapsStatus }
+  | { ok: false; error: string }
+
+// What Lich's own data files say is WHERE (main/lichMapData.ts), for the Graph
+// map's Find lens (v1.1.0). One row is one named thing and the Lich room ids
+// that have it. `rooms` are LICH ids (the map's `id`, not the game's uid).
+export type MapDataCategory = 'hunting' | 'forage' | 'town' | 'shrine' | 'mining' | 'lumber' | 'climbing' | 'swimming'
+export interface MapDataRow {
+  category: MapDataCategory
+  name:     string
+  town?:    string
+  rooms:    number[]
+  note?:    string      // a few words: a rank range, an NPC's name
+}
+export interface MapDataFile {
+  file:     string
+  rows:     number
+  missing?: boolean     // the file isn't there (a Lich install without dr-scripts data)
+  error?:   string      // it is there and couldn't be read or understood
+}
+export interface MapDataResult {
+  rows: MapDataRow[]; files: MapDataFile[]
+  /** The files' sizes and times when read (`lich:map-data-stamp` gives the current one). */
+  stamp?: string
+}
