@@ -15,14 +15,14 @@ import { areaProvince } from '../../src/renderer/components/panels/damaps/daMaps
 import {
   DA_WORLD_VERSION, type DaWorldArea, type DaWorldFile, type DaWorldRoom,
 } from '../../src/renderer/components/panels/damaps/damapsWorld'
-import { readGenieXml } from './readGenieXml'
+import { readGenieXml, decodeMapFile } from './readGenieXml'
 import { parseDamap, damapToZone } from './damapFormat'
 import { mergeSubMaps } from './genieMerge'
 import { matchGenieToLich } from './genieMatch'
 import { buildGenieArea, genieAreaKey, genieLevels, zoneIdByFile } from './genieArea'
 
 const [mapsDir, lichFile, outFile, damapArg] = process.argv.slice(2)
-if (!mapsDir || !lichFile || !outFile) {
+if (!lichFile || !outFile) {
   console.error('usage: build-damaps <Genie maps folder> <Lich map-NNNN.json> <out.json> [.damap folder]')
   process.exit(1)
 }
@@ -31,7 +31,7 @@ if (!mapsDir || !lichFile || !outFile) {
 const lichRooms: LichRoom[] = JSON.parse(fs.readFileSync(lichFile, 'utf8'))
 const lichDb = new Map(lichRooms.map(r => [r.id, r]))
 
-const files = fs.readdirSync(mapsDir).filter(f => f.toLowerCase().endsWith('.xml')).sort()
+const files = mapsDir ? fs.readdirSync(mapsDir).filter(f => f.toLowerCase().endsWith('.xml')).sort() : []
 
 // Da'Maps' own maps (.damap, made in the DaMaps Editor) live in the repo, in
 // tools/damaps/maps/. One whose `file` names a Genie map replaces that map;
@@ -59,7 +59,7 @@ for (const f of sourceNames) {
     z = own
     if (files.some(x => x.toLowerCase() === f.toLowerCase())) replaced++; else added++
   } else {
-    try { z = readGenieXml(fs.readFileSync(path.join(mapsDir, f), 'utf8'), f) }
+    try { z = readGenieXml(decodeMapFile(fs.readFileSync(path.join(mapsDir, f))), f) }
     catch (e) { console.warn(`skipped ${f}: ${(e as Error).message}`); continue }
   }
   if (!z.nodes.length) continue
@@ -134,7 +134,7 @@ for (const a of areas) for (const r of a.rooms) {
 const out: DaWorldFile = {
   version: DA_WORLD_VERSION,
   made: new Date().toISOString().slice(0, 10),
-  sources: { maps: `${files.length} Genie map files` + (damaps.size ? ` + ${damaps.size} .damap` : ''), lich: path.basename(lichFile) },
+  sources: { maps: [files.length ? `${files.length} Genie map files` : '', damaps.size ? `${damaps.size} .damap maps` : ''].filter(Boolean).join(' + '), lich: path.basename(lichFile) },
   stats: { areas: areas.length, squares, matched },
   areas,
 }

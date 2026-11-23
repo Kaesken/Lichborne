@@ -5,6 +5,7 @@
 import { app, BrowserWindow, Menu, dialog, ipcMain, shell } from 'electron'
 import fs from 'node:fs'
 import path from 'node:path'
+import { decodeMapFile } from '../../damaps/readGenieXml'
 
 let win: BrowserWindow | null = null
 let dirty = false
@@ -64,9 +65,13 @@ function menu() {
   Menu.setApplicationMenu(Menu.buildFromTemplate(tpl))
 }
 
-/** Where maps are saved by default: Documents\DaMaps */
+/**
+ * Where maps are kept: a Maps folder beside the program (the portable exe sets
+ * PORTABLE_EXECUTABLE_DIR), else Documents\DaMaps when run from source.
+ */
 function mapsFolder() {
-  const dir = path.join(app.getPath('documents'), 'DaMaps')
+  const beside = process.env.PORTABLE_EXECUTABLE_DIR
+  const dir = beside ? path.join(beside, 'Maps') : path.join(app.getPath('documents'), 'DaMaps')
   fs.mkdirSync(dir, { recursive: true })
   return dir
 }
@@ -79,7 +84,7 @@ ipcMain.handle('open', async () => {
 ipcMain.handle('import', async () => {
   const r = await dialog.showOpenDialog(win!, { title: 'Import a Genie map', filters: [{ name: 'Genie map', extensions: ['xml'] }], properties: ['openFile'] })
   if (r.canceled || !r.filePaths[0]) return null
-  return { name: path.basename(r.filePaths[0]), text: fs.readFileSync(r.filePaths[0], 'utf8') }
+  return { name: path.basename(r.filePaths[0]), text: decodeMapFile(fs.readFileSync(r.filePaths[0])) }
 })
 ipcMain.handle('save', async (_e, args: { path: string | null; text: string; suggested: string }) => {
   let p = args.path

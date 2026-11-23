@@ -7,8 +7,8 @@ reads from [`tools/damaps/maps/`](../damaps/maps/).
 ## Using it
 
 1. Open **DaMaps Editor.exe**. It needs no install.
-2. Start a new map (**File → New map**), open a `.damap`, or **File → Import
-   Genie map…** to start from an existing Genie map.
+2. Open a map from the **Maps** folder beside the program (**File → Open…**),
+   start a new one (**File → New map**), or **File → Import Genie map…**.
 3. Edit with the four tools:
    - **Select (V)**: click a room to edit it on the right; drag to move; drag on empty space to select several.
    - **Room (R)**: click to place a room. Shift-click places one and links it to the selected room.
@@ -16,7 +16,7 @@ reads from [`tools/damaps/maps/`](../damaps/maps/).
    - **Label (T)**: click to place a place name.
 4. Give every room its title and description exactly as the game shows them.
    That's how Da'Maps finds where you are.
-5. **Save**. Maps go to `Documents\DaMaps` unless you pick somewhere else.
+5. **Save**. Maps go to the **Maps** folder beside the program unless you pick somewhere else.
 6. Send the `.damap` file to be added. It goes into `tools/damaps/maps/`, and
    the next Da'Maps build picks it up.
 

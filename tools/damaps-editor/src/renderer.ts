@@ -329,8 +329,8 @@ function renderRoomProps(r: DaMapRoom) {
     const move = textBox(e.move, v => { e.move = v })
     const to = numBox(e.to, v => { e.to = v! })
     const t = byId.get(e.to)
-    to.title = t ? `#${t.id} ${t.title || '(no title)'}${t.z !== r.z ? ` (${floorName(t.z)})` : ''}` : 'No room with this number on the map'
-    if (!t) to.style.borderColor = 'var(--danger)'
+    to.title = t ? `#${t.id} ${t.title || '(no title)'}${t.z !== r.z ? ` (${floorName(t.z)})` : ''}` : e.to === 0 ? '0: leads somewhere not on this map' : 'No room with this number on the map'
+    if (!t && e.to !== 0) to.style.borderColor = 'var(--danger)'
     const hid = h('input', { type: 'checkbox', title: 'Hidden: a real exit that isn\'t drawn as a line' }) as HTMLInputElement
     hid.checked = !!e.hidden
     hid.onchange = () => change(() => { if (hid.checked) e.hidden = true; else delete e.hidden })
@@ -341,7 +341,7 @@ function renderRoomProps(r: DaMapRoom) {
   props.append(table)
   const add = h('button', { class: 'small' }, '+ Add exit')
   add.onclick = () => change(() => { r.exits.push({ to: r.id, exit: 'go', move: 'go ' }) })
-  props.append(h('p', { class: 'hint' }, 'The Link tool adds exits for you. Use this table for doors and other commands (“go door”, “climb ladder”).'))
+  props.append(h('p', { class: 'hint' }, 'The Link tool adds exits for you. Use this table for doors and other commands (“go door”, “climb ladder”). To # 0 means the exit leads somewhere not on this map.'))
   const del = h('button', { class: 'danger' }, 'Delete room')
   del.onclick = () => deleteSelection()
   props.append(h('div', { class: 'row' }, add, del))

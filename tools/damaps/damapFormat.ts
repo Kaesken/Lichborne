@@ -2,7 +2,7 @@
 //
 // One file is one map (all its floors): rooms with their position, title,
 // descriptions, colour and exits, plus free-standing place names. It is plain
-// pretty-printed JSON so a change shows up as a readable diff in a pull
+// JSON, one room per line, so a change shows up as a readable diff in a pull
 // request. The DaMaps Editor (tools/damaps-editor) reads and writes it, and
 // the Da'Maps build (build.ts) reads every file in tools/damaps/maps/:
 //   - a .damap whose `file` names a Genie map in the maps folder replaces it;
@@ -25,7 +25,7 @@ export const EXIT_KINDS = [
 ] as const
 
 export interface DaMapExit {
-  /** room id this exit leads to (on this map) */
+  /** room id this exit leads to (on this map); 0 = somewhere not on this map */
   to:      number
   /** which way (EXIT_KINDS); 'go' and 'climb' are any other command */
   exit:    string
@@ -123,7 +123,7 @@ export function parseDamap(text: string): DaMapFile {
     labels: labels.map((l0): DaMapLabel => {
       const l = l0 as Record<string, unknown>
       return { text: str(l.text), x: num(l.x), y: num(l.y), z: Math.trunc(num(l.z)) }
-    }).filter(l => l.text.trim()),
+    }),
   }
   if (!out.file.toLowerCase().endsWith('.xml')) out.file += '.xml'
   return out
@@ -139,18 +139,22 @@ export function checkDamap(m: DaMapFile): string[] {
   const untitled = m.rooms.filter(r => !r.title.trim() && !r.linksTo).length
   if (untitled) out.push(`${untitled} room${untitled === 1 ? ' has' : 's have'} no title`)
   let broken = 0
-  for (const r of m.rooms) for (const e of r.exits) if (!ids.has(e.to)) broken++
+  for (const r of m.rooms) for (const e of r.exits) if (e.to && !ids.has(e.to)) broken++
   if (broken) out.push(`${broken} exit${broken === 1 ? ' leads' : 's lead'} to a room that isn't on this map`)
   const lone = m.rooms.filter(r => !r.exits.length && !m.rooms.some(o => o.exits.some(e => e.to === r.id))).length
   if (lone) out.push(`${lone} room${lone === 1 ? ' has' : 's have'} no exits`)
   return out
 }
 
-/** Pretty JSON, rooms in id order, so a saved map diffs cleanly. */
+/**
+ * JSON with one room per line, so a saved map diffs cleanly. Rooms stay in the
+ * map's own order (new ones at the end): the Lich matcher breaks ties by order,
+ * so sorting them would change which Lich room a square gets.
+ */
 export function stringifyDamap(m: DaMapFile): string {
   const clean: DaMapFile = {
     format: DAMAP_FORMAT, version: DAMAP_VERSION, id: m.id, name: m.name, file: m.file,
-    rooms: [...m.rooms].sort((a, b) => a.id - b.id).map(r => {
+    rooms: m.rooms.map(r => {
       const o: DaMapRoom = { id: r.id, x: r.x, y: r.y, z: r.z, title: r.title, descriptions: r.descriptions, exits: r.exits.map(e => (e.hidden ? { to: e.to, exit: e.exit, move: e.move, hidden: true } : { to: e.to, exit: e.exit, move: e.move })) }
       if (r.color) o.color = r.color
       if (r.aliases?.length) o.aliases = r.aliases
@@ -160,7 +164,11 @@ export function stringifyDamap(m: DaMapFile): string {
     }),
     labels: m.labels,
   }
-  return JSON.stringify(clean, null, 1) + '\n'
+  // One room (and one place name) per line: small files, and a change to a room
+  // shows up as a one-line diff.
+  const head = JSON.stringify({ format: clean.format, version: clean.version, id: clean.id, name: clean.name, file: clean.file }, null, 1).slice(0, -2)
+  const list = (xs: unknown[]) => xs.length ? '[\n' + xs.map(x => '  ' + JSON.stringify(x)).join(',\n') + '\n ]' : '[]'
+  return `${head},\n "rooms": ${list(clean.rooms)},\n "labels": ${list(clean.labels)}\n}\n`
 }
 
 // ── Genie zone <-> .damap ───────────────────────────────────────────────────
@@ -177,7 +185,7 @@ export function zoneToDamap(zone: GenieZone): DaMapFile {
       const parts = (n.note ?? '').split('|').map(s => s.trim()).filter(Boolean)
       const room: DaMapRoom = {
         id: n.id, x: n.x, y: n.y, z: n.z, title: n.name, descriptions: [...n.descriptions],
-        exits: n.arcs.filter(a => a.destination).map(a => (a.hidden
+        exits: n.arcs.map(a => (a.hidden
           ? { to: a.destination, exit: a.exit || 'go', move: a.move, hidden: true }
           : { to: a.destination, exit: a.exit || 'go', move: a.move })),
       }
