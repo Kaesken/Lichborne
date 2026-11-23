@@ -292,10 +292,8 @@ interface RouteRun {
   area:   string     // the map the route is on
   legs:   DaLeg[]
   i:      number     // the leg under way
-  /** for a walk leg: the walker reported this walk at least once, and its last count */
-  seen:   boolean
-  done:   number
-  total:  number
+  /** the walker's name for the leg under way: where that leg ends */
+  legLabel: string
 }
 const routeRuns = new Map<string, RouteRun>()
 /** game room number → the "?" square it was on, learnt while walking (per character, this session) */
@@ -307,8 +305,6 @@ function seenFor(character: string) {
 }
 /** how long go2 gets to reach the end of its leg */
 const GO2_LEG_MS = 10 * 60_000
-/** a walk leg the walker never reported (its first step needs the player) */
-const WALK_START_MS = 2500
 
 function DaMapsCanvas({ world: daWorld, lichDb, currentRoom, character, roomTitle, roomId, onSendCommand }: {
   world: DaWorld; lichDb: Map<number, LichRoom>; currentRoom?: LichRoom; character: string
@@ -453,7 +449,7 @@ function DaMapsCanvas({ world: daWorld, lichDb, currentRoom, character, roomTitl
     const known = roomId != null ? seen.get(roomId) ?? (walkPinRef.current?.roomId === roomId ? walkPinRef.current.place : undefined) : undefined
     if (known) { place(known); return }
     const r = runRef.current, leg = r?.legs[r.i]
-    if (r && leg?.kind === 'walk' && walkStatus && walkStatus.label === r.label) {
+    if (r && leg?.kind === 'walk' && walkStatus && walkStatus.label === r.legLabel) {
       const sq = leg.squares[Math.min(walkStatus.done, leg.squares.length - 1)]
       if (isUnmapped(src.area(r.area)?.byId.get(sq))) { place({ area: r.area, square: sq }); return }
     }
@@ -478,59 +474,53 @@ function DaMapsCanvas({ world: daWorld, lichDb, currentRoom, character, roomTitl
   }, [setRun])
   const startLeg = useCallback((r: RouteRun, i: number) => {
     clearTimers()
-    const next: RouteRun = { ...r, i, seen: false, done: 0, total: 0 }
+    const leg = r.legs[i]
+    const endSq = src.area(r.area)?.byId.get(legEnd(leg))
+    // the walker names the end of ITS leg, so "Arrived at …" is true when it says it
+    const legLabel = i === r.legs.length - 1 ? r.label : endSq?.title || r.label
+    const next: RouteRun = { ...r, i, legLabel }
     setRun(next)
-    const leg = next.legs[i]
     const go = () => {
-      if (runRef.current !== next && runRef.current?.i !== i) return
+      if (runRef.current !== next) return
       if (leg.kind === 'go2') {
         onSendCommand(`;go2 ${leg.lich}`)
         timers.current.push(setTimeout(() => endRun("go2 didn't get there in 10 minutes."), GO2_LEG_MS))
-      } else {
-        walkApi?.start(leg.moves, next.label)
-        // a walk whose first step needs you never starts; the walker has said why
-        timers.current.push(setTimeout(() => { if (runRef.current && !runRef.current.seen) endRun() }, WALK_START_MS))
+        return
       }
+      if (!walkApi) { endRun("walking isn't available here."); return }
+      walkApi.start(leg.moves, legLabel, arrived => {
+        if (runRef.current !== next) return
+        // stopped part-way: the walker has said why in the game window
+        if (!arrived) { endRun(); return }
+        if (isUnmapped(endSq)) {
+          const p = { area: r.area, square: legEnd(leg) }
+          setUnmappedHere(p); lastPlaceRef.current = p
+          // the room number can lag the last step by a frame
+          setTimeout(() => {
+            if (roomIdRef.current == null) return
+            walkPinRef.current = { roomId: roomIdRef.current, place: p }
+            seenFor(character).set(roomIdRef.current, p)
+          }, 300)
+        }
+        nextLeg()
+      })
     }
     // a short breath between legs, so the next one doesn't trip over the last
     if (i === 0) go(); else timers.current.push(setTimeout(go, 400))
-  }, [setRun, endRun, onSendCommand, walkApi])
-  const nextLeg = useCallback(() => {
+  }, [setRun, endRun, onSendCommand, walkApi, src, character]) // eslint-disable-line react-hooks/exhaustive-deps
+  const nextLegRef = useRef<() => void>(() => {})
+  const nextLeg = () => nextLegRef.current()
+  nextLegRef.current = () => {
     const r = runRef.current
     if (!r) return
     if (r.i + 1 >= r.legs.length) { clearTimers(); setRun(null); return }
     startLeg(r, r.i + 1)
-  }, [setRun, startLeg])
+  }
   // go2 leg: done when Lich says you're in its room
   useEffect(() => {
     const r = runRef.current, leg = r?.legs[r.i]
     if (leg?.kind === 'go2' && currentRoom?.id === leg.lich) nextLeg()
-  }, [currentRoom?.id, run?.i, nextLeg]) // eslint-disable-line react-hooks/exhaustive-deps
-  // walk leg: done when the walker finishes every step
-  useEffect(() => {
-    const r = runRef.current, leg = r?.legs[r.i]
-    if (!r || leg?.kind !== 'walk') return
-    if (walkStatus && walkStatus.label === r.label) {
-      r.seen = true; r.done = walkStatus.done; r.total = walkStatus.total
-      return
-    }
-    if (walkStatus) { endRun('another walk started.'); return }
-    if (!r.seen) return
-    if (r.done >= r.total) {
-      const end = legEnd(leg)
-      const sq = src.area(r.area)?.byId.get(end)
-      if (isUnmapped(sq)) {
-        const p = { area: r.area, square: end }
-        setUnmappedHere(p); lastPlaceRef.current = p
-        setTimeout(() => {
-          if (roomIdRef.current == null) return
-          walkPinRef.current = { roomId: roomIdRef.current, place: p }
-          seenFor(character).set(roomIdRef.current, p)
-        }, 300)
-      }
-      nextLeg()
-    } else endRun()   // stopped part-way: the walker has said why in the game window
-  }, [walkStatus, run?.i]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [currentRoom?.id, run?.i]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const cancelRun = useCallback(() => {
     const r = runRef.current, leg = r?.legs[r.i]
@@ -549,7 +539,7 @@ function DaMapsCanvas({ world: daWorld, lichDb, currentRoom, character, roomTitl
     if ('error' in plan) { showToast({ kind: 'warning', title: `Can't walk to ${label}`, message: plan.error[0].toUpperCase() + plan.error.slice(1) + '.' }); return }
     if (!walkApi) { showToast({ kind: 'warning', title: `Can't walk to ${label}`, message: 'Walking isn\'t available here.' }); return }
     if (runRef.current) cancelRun()
-    startLeg({ label, area: area.image, legs: plan.legs, i: 0, seen: false, done: 0, total: 0 }, 0)
+    startLeg({ label, area: area.image, legs: plan.legs, i: 0, legLabel: label }, 0)
   }
   const goToRef = useRef(goTo)
   goToRef.current = goTo

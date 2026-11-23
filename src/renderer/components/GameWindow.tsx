@@ -6006,10 +6006,10 @@ export default function GameWindow({
       walkerRef.current?.stop()
     }
   }, [session.sessionId])
-  const startGenieWalk = useCallback((moves: string[], label: string) => {
+  const startGenieWalk = useCallback((moves: string[], label: string, onEnd?: (arrived: boolean) => void) => {
     const s = walkSettingsRef.current
     walkerRef.current!.start(planGenieWalk(moves), label,
-      { ahead: s.mapWalkAhead, retryOnce: s.mapWalkRetry, pauseMs: s.mapWalkPauseMs })
+      { ahead: s.mapWalkAhead, retryOnce: s.mapWalkRetry, pauseMs: s.mapWalkPauseMs }, onEnd)
   }, [])
   const stopGenieWalk = useCallback(() => walkerRef.current?.stop('you stopped it'), [])
   // Every mounted Genie map registers; the newest answers. A list, not one
