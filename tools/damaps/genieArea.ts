@@ -109,15 +109,23 @@ export function buildGenieArea(
   // The moves into and out of "?" squares (rooms Lich's map doesn't have), so
   // Da'Maps can walk the part of a route go2 can't. Hidden arcs count: they
   // aren't drawn, but they're still a way through.
+  // Genie helper scripts (`script autoclimbup`, `.travel`, …) don't exist in
+  // Lichborne and aren't needed there (Kaesken, 2026-11-22): such a step is
+  // left out, so a route that needs it isn't offered rather than stopping on it.
+  const genieScript = (m: string) => /^\s*(?:script\s|\.)/i.test(m)
   const moves = new Map<string, string>()
   const unmapped = (id: number) => { const r = byId.get(id); return !!r && r.lich === null && !r.stubTo }
   for (const n of zone.nodes) {
     if (!byId.has(n.id)) continue
     for (const a of n.arcs) {
-      if (!a.move || !byId.has(a.destination) || a.destination === n.id) continue
+      if (!a.move || genieScript(a.move) || !byId.has(a.destination) || a.destination === n.id) continue
       if (!unmapped(n.id) && !unmapped(a.destination)) continue
       const k = `${n.id}>${a.destination}`
-      if (!moves.has(k)) moves.set(k, a.move)
+      // Genie's `#send N cmd` (send after N seconds) becomes the walker's own
+      // `-N cmd` wait; any other Genie #command leaves the step out.
+      const move = a.move.replace(/(^|;)\s*#send\s+(\d+)\s+/gi, '$1-$2 ')
+      if (/(^|;)\s*#/.test(move)) continue
+      if (!moves.has(k)) moves.set(k, move)
     }
   }
 
