@@ -41,6 +41,9 @@ export interface DaWorldArea {
   lines:     DaWorldLine[]
   texts:     [string, number, number][]
   buildings: DaWorldBuilding[]
+  /** [from id, to id, Genie move] where either end is a "?" square (optional:
+   *  files made before 2026-11-22 have none, and then those rooms can't be walked) */
+  moves?:    [number, number, string][]
 }
 
 export interface DaWorldFile {
@@ -132,11 +135,12 @@ export function hydrateArea(a: DaWorldArea, lichDb: Map<number, LichRoom>): DaAr
   }))
   buildings.forEach((b, i) => { for (const id of b.rooms) { const r = byId.get(id); if (r) r.building = i } })
   const texts = a.texts.map(([text, x, y]) => ({ text, x, y }))
+  const moves = new Map((a.moves ?? []).map(([f, t, m]) => [`${f}>${t}`, m]))
   const xs = rooms.map(r => r.x).concat(texts.map(t => t.x)), ys = rooms.map(r => r.y).concat(texts.map(t => t.y))
   const bbox = rooms.length
     ? { x1: Math.min(...xs), y1: Math.min(...ys), x2: Math.max(...xs), y2: Math.max(...ys) }
     : { x1: 0, y1: 0, x2: 100, y2: 100 }
-  return { image: a.key, name: a.name, rooms, byId, byLich, arcs, buildings, bbox, texts }
+  return { image: a.key, name: a.name, rooms, byId, byLich, arcs, buildings, bbox, texts, moves }
 }
 
 // ── Map art (painted backgrounds) ────────────────────────────────────────────

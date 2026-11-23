@@ -106,6 +106,21 @@ export function buildGenieArea(
     }
   }
 
+  // The moves into and out of "?" squares (rooms Lich's map doesn't have), so
+  // Da'Maps can walk the part of a route go2 can't. Hidden arcs count: they
+  // aren't drawn, but they're still a way through.
+  const moves = new Map<string, string>()
+  const unmapped = (id: number) => { const r = byId.get(id); return !!r && r.lich === null && !r.stubTo }
+  for (const n of zone.nodes) {
+    if (!byId.has(n.id)) continue
+    for (const a of n.arcs) {
+      if (!a.move || !byId.has(a.destination) || a.destination === n.id) continue
+      if (!unmapped(n.id) && !unmapped(a.destination)) continue
+      const k = `${n.id}>${a.destination}`
+      if (!moves.has(k)) moves.set(k, a.move)
+    }
+  }
+
   // A ↗ marker from the map file stands for a room on the next map: find that
   // Lich room, so right-click can go2 there. It's the room its door's Lich
   // exits lead to by the same move, or else the one with the marker's name.
@@ -291,5 +306,5 @@ export function buildGenieArea(
 
   const levels = genieLevels(zone)
   const name = zone.name + (levels.length > 1 ? (level === 0 ? '' : ` (floor ${level > 0 ? '+' : ''}${level})`) : '')
-  return { image: genieAreaKey(zone.id, level), name, rooms, byId, byLich, arcs, buildings, bbox, texts }
+  return { image: genieAreaKey(zone.id, level), name, rooms, byId, byLich, arcs, buildings, bbox, texts, moves }
 }

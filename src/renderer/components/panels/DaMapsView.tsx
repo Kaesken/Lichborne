@@ -8,13 +8,18 @@
 //   - hover a room        → the side panel's "Room" tab shows it
 //   - left-click a room   → pin it in the "Room" tab (click again to unpin);
 //                           a ↗ marker opens the map it leads to
-//   - right-click a room  → `;go2 <lich id>`
+//   - right-click a room  → `;go2 <lich id>`; for a "?" square (not in Lich's
+//                           map) go2 goes as far as it can and Lichborne's own
+//                           walker does the rest (damaps/daMapsWalk.ts)
 //   - drag to pan, wheel to zoom
 import { useState, useRef, useEffect, useMemo, useCallback, type CSSProperties } from 'react'
 import type { LichRoom } from './mapTypes'
 import { COLOR_LEGEND } from './mapTypes'
 import { loadDaWorld, loadDaArt, hydrateArea, DA_ROOM_SIZE, type DaWorld, type DaArt } from './damaps/damapsWorld'
-import { lichTitle } from './mapTypes'
+import { lichTitle, normalizeMatchKey } from './mapTypes'
+import { planDaRoute, locateUnmapped, legEnd, isUnmapped, type DaLeg } from './damaps/daMapsWalk'
+import { useGenieWalk } from '../../GenieWalkContext'
+import { showToast } from '../../toasts'
 import {
   DA_MAPS_NAME, DA_ARC_COLOR, DA_CATEGORIES, DA_OBS_EVENT,
   LABEL_FONT, CHAR_W, loadObservations, PROVINCE_ORDER,
@@ -25,6 +30,9 @@ interface Props {
   lichDb:        Map<number, LichRoom>
   currentRoom?:  LichRoom
   character:     string
+  /** the game's room title and number, for finding you on a "?" square */
+  roomTitle?:    string
+  roomId?:       number
   onSendCommand: (cmd: string) => void
 }
 
@@ -170,7 +178,7 @@ function HerePing({ x, y, size }: { x: number; y: number; size: number }) {
   )
 }
 
-export default function DaMapsView({ lichDb, currentRoom, character, onSendCommand }: Props) {
+export default function DaMapsView({ lichDb, currentRoom, character, roomTitle, roomId, onSendCommand }: Props) {
   // Da'Maps' own map, loaded once (a separate chunk).
   const [daWorld, setDaWorld] = useState<DaWorld | null>(null)
   const [worldError, setWorldError] = useState<string | null>(null)
@@ -190,7 +198,8 @@ export default function DaMapsView({ lichDb, currentRoom, character, onSendComma
       </div>
     )
   }
-  return <DaMapsCanvas world={daWorld} lichDb={lichDb} currentRoom={currentRoom} character={character} onSendCommand={onSendCommand} />
+  return <DaMapsCanvas world={daWorld} lichDb={lichDb} currentRoom={currentRoom} character={character}
+    roomTitle={roomTitle ?? ''} roomId={roomId} onSendCommand={onSendCommand} />
 }
 
 // ── The province map (Global's first view) ──────────────────────────────────
@@ -275,8 +284,35 @@ export function ProvinceMap({ counts, here, hover, onHover, onOpen, rightInset }
   )
 }
 
-function DaMapsCanvas({ world: daWorld, lichDb, currentRoom, character, onSendCommand }: {
-  world: DaWorld; lichDb: Map<number, LichRoom>; currentRoom?: LichRoom; character: string; onSendCommand: (cmd: string) => void
+// ── Walking to "?" squares ───────────────────────────────────────────────────
+// A route in progress, one per character. Module scope so it survives the view
+// being closed and reopened (the walker and go2 keep going either way).
+interface RouteRun {
+  label:  string     // the target's name
+  area:   string     // the map the route is on
+  legs:   DaLeg[]
+  i:      number     // the leg under way
+  /** for a walk leg: the walker reported this walk at least once, and its last count */
+  seen:   boolean
+  done:   number
+  total:  number
+}
+const routeRuns = new Map<string, RouteRun>()
+/** game room number → the "?" square it was on, learnt while walking (per character, this session) */
+const seenSquares = new Map<string, Map<number, { area: string; square: number }>>()
+function seenFor(character: string) {
+  let m = seenSquares.get(character)
+  if (!m) { m = new Map(); seenSquares.set(character, m) }
+  return m
+}
+/** how long go2 gets to reach the end of its leg */
+const GO2_LEG_MS = 10 * 60_000
+/** a walk leg the walker never reported (its first step needs the player) */
+const WALK_START_MS = 2500
+
+function DaMapsCanvas({ world: daWorld, lichDb, currentRoom, character, roomTitle, roomId, onSendCommand }: {
+  world: DaWorld; lichDb: Map<number, LichRoom>; currentRoom?: LichRoom; character: string
+  roomTitle: string; roomId?: number; onSendCommand: (cmd: string) => void
 }) {
   // ── Areas ──────────────────────────────────────────────────────────────────
   const [mode, setMode] = useState<'local' | 'global'>('local')
@@ -311,7 +347,9 @@ function DaMapsCanvas({ world: daWorld, lichDb, currentRoom, character, onSendCo
   }
 
   const [areaImage, setAreaImage] = useState<string>('')
-  const hereImage = currentRoom ? src.areaOf(currentRoom.id, areaImage) : ''
+  // Where you are when Lich's map doesn't know the room: a "?" square.
+  const [unmappedHere, setUnmappedHere] = useState<{ area: string; square: number } | null>(null)
+  const hereImage = currentRoom ? src.areaOf(currentRoom.id, areaImage) : unmappedHere?.area ?? ''
   const [followPlayer, setFollowPlayer] = useState(true)
   const hereProvince = hereImage ? src.province(src.floors(hereImage)[0] ?? hereImage) : null
   const area = useMemo(() => src.area(areaImage), [src, areaImage])
@@ -319,6 +357,7 @@ function DaMapsCanvas({ world: daWorld, lichDb, currentRoom, character, onSendCo
   const [artByKey, setArtByKey] = useState<Map<string, DaArt> | null>(null)
   useEffect(() => { let live = true; loadDaArt().then(m => { if (live) setArtByKey(m) }); return () => { live = false } }, [])
   const art = area ? artByKey?.get(area.image) : undefined
+  const hasArt = !!art
   useEffect(() => { if (!areaImage && hereImage) setAreaImage(hereImage) }, [areaImage, hereImage])
   // A different source (Genie maps just loaded) uses different area keys.
   useEffect(() => { setAreaImage(currentRoom ? src.areaOf(currentRoom.id) : '') }, [src]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -352,7 +391,9 @@ function DaMapsCanvas({ world: daWorld, lichDb, currentRoom, character, onSendCo
   }, [])
 
   // Follow the player across areas; recentre when they move (only while following).
-  const hereRoom = area && currentRoom ? area.byLich.get(currentRoom.id) : undefined
+  const hereRoom = !area ? undefined
+    : currentRoom ? area.byLich.get(currentRoom.id)
+    : unmappedHere?.area === area.image ? area.byId.get(unmappedHere.square) : undefined
   useEffect(() => {
     if (followPlayer && hereImage && hereImage !== areaImage) setAreaImage(hereImage)
   }, [followPlayer, hereImage, areaImage])
@@ -369,6 +410,149 @@ function DaMapsCanvas({ world: daWorld, lichDb, currentRoom, character, onSendCo
   useEffect(() => {
     if (mode === 'local' && followPlayer && hereRoom && fittedFor.current === area?.image) centerOn(hereRoom)
   }, [hereRoom?.id]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Finding you on a "?" square ───────────────────────────────────────────
+  // Lich's map has no entry for these rooms, so `currentRoom` is empty there.
+  // In order: a room number we've seen on a square before, the square the
+  // walk says you're on, then the room title among the "?" squares of the map
+  // you were last on (a tie goes to the one next to where you were).
+  const walkApi = useGenieWalk()
+  const walkStatus = walkApi?.status ?? null
+  const runRef = useRef<RouteRun | null>(routeRuns.get(character) ?? null)
+  const [run, setRunState] = useState<RouteRun | null>(runRef.current)
+  const setRun = useCallback((r: RouteRun | null) => {
+    runRef.current = r
+    if (r) routeRuns.set(character, r); else routeRuns.delete(character)
+    setRunState(r ? { ...r } : null)
+  }, [character])
+  const lastPlaceRef = useRef<{ area: string; square: number } | null>(null)
+  /** where a finished walk left you, by the game's room number there (it's
+   *  read a moment after the walk ends, as the number can lag a frame) */
+  const walkPinRef = useRef<{ roomId: number; place: { area: string; square: number } } | null>(null)
+  const roomIdRef = useRef(roomId)
+  roomIdRef.current = roomId
+  const areaImageRef = useRef(areaImage)
+  areaImageRef.current = areaImage
+  useEffect(() => {
+    if (currentRoom) {
+      setUnmappedHere(null)
+      const k = src.areaOf(currentRoom.id, areaImageRef.current)
+      const sq = k ? src.area(k)?.byLich.get(currentRoom.id) : undefined
+      if (sq) lastPlaceRef.current = { area: k, square: sq.id }
+      return
+    }
+    const seen = seenFor(character)
+    const place = (p: { area: string; square: number }) => {
+      setUnmappedHere(p)
+      lastPlaceRef.current = p
+      // The room number can lag the walk by a frame, so it's remembered only
+      // once the room's title agrees with the square's.
+      const sq = src.area(p.area)?.byId.get(p.square)
+      if (roomId != null && sq && normalizeMatchKey(sq.title) === normalizeMatchKey(roomTitle)) seen.set(roomId, p)
+    }
+    const known = roomId != null ? seen.get(roomId) ?? (walkPinRef.current?.roomId === roomId ? walkPinRef.current.place : undefined) : undefined
+    if (known) { place(known); return }
+    const r = runRef.current, leg = r?.legs[r.i]
+    if (r && leg?.kind === 'walk' && walkStatus && walkStatus.label === r.label) {
+      const sq = leg.squares[Math.min(walkStatus.done, leg.squares.length - 1)]
+      if (isUnmapped(src.area(r.area)?.byId.get(sq))) { place({ area: r.area, square: sq }); return }
+    }
+    const last = lastPlaceRef.current
+    const key = last?.area ?? areaImageRef.current
+    const a = key ? src.area(key) : null
+    const hit = a && roomTitle ? locateUnmapped(a, roomTitle, last?.area === key ? last.square : null) : undefined
+    if (hit && a) { place({ area: a.image, square: hit.id }); return }
+    setUnmappedHere(null)
+  }, [currentRoom, roomId, roomTitle, walkStatus?.done, src, character]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Running a route ────────────────────────────────────────────────────────
+  // Each leg ends on a known square; reaching it starts the next leg.
+  const timers = useRef<ReturnType<typeof setTimeout>[]>([])
+  const clearTimers = () => { timers.current.forEach(clearTimeout); timers.current = [] }
+  useEffect(() => () => clearTimers(), [])
+  const endRun = useCallback((why?: string) => {
+    clearTimers()
+    const r = runRef.current
+    setRun(null)
+    if (why && r) showToast({ kind: 'warning', title: `Walk to ${r.label} stopped`, message: why })
+  }, [setRun])
+  const startLeg = useCallback((r: RouteRun, i: number) => {
+    clearTimers()
+    const next: RouteRun = { ...r, i, seen: false, done: 0, total: 0 }
+    setRun(next)
+    const leg = next.legs[i]
+    const go = () => {
+      if (runRef.current !== next && runRef.current?.i !== i) return
+      if (leg.kind === 'go2') {
+        onSendCommand(`;go2 ${leg.lich}`)
+        timers.current.push(setTimeout(() => endRun("go2 didn't get there in 10 minutes."), GO2_LEG_MS))
+      } else {
+        walkApi?.start(leg.moves, next.label)
+        // a walk whose first step needs you never starts; the walker has said why
+        timers.current.push(setTimeout(() => { if (runRef.current && !runRef.current.seen) endRun() }, WALK_START_MS))
+      }
+    }
+    // a short breath between legs, so the next one doesn't trip over the last
+    if (i === 0) go(); else timers.current.push(setTimeout(go, 400))
+  }, [setRun, endRun, onSendCommand, walkApi])
+  const nextLeg = useCallback(() => {
+    const r = runRef.current
+    if (!r) return
+    if (r.i + 1 >= r.legs.length) { clearTimers(); setRun(null); return }
+    startLeg(r, r.i + 1)
+  }, [setRun, startLeg])
+  // go2 leg: done when Lich says you're in its room
+  useEffect(() => {
+    const r = runRef.current, leg = r?.legs[r.i]
+    if (leg?.kind === 'go2' && currentRoom?.id === leg.lich) nextLeg()
+  }, [currentRoom?.id, run?.i, nextLeg]) // eslint-disable-line react-hooks/exhaustive-deps
+  // walk leg: done when the walker finishes every step
+  useEffect(() => {
+    const r = runRef.current, leg = r?.legs[r.i]
+    if (!r || leg?.kind !== 'walk') return
+    if (walkStatus && walkStatus.label === r.label) {
+      r.seen = true; r.done = walkStatus.done; r.total = walkStatus.total
+      return
+    }
+    if (walkStatus) { endRun('another walk started.'); return }
+    if (!r.seen) return
+    if (r.done >= r.total) {
+      const end = legEnd(leg)
+      const sq = src.area(r.area)?.byId.get(end)
+      if (isUnmapped(sq)) {
+        const p = { area: r.area, square: end }
+        setUnmappedHere(p); lastPlaceRef.current = p
+        setTimeout(() => {
+          if (roomIdRef.current == null) return
+          walkPinRef.current = { roomId: roomIdRef.current, place: p }
+          seenFor(character).set(roomIdRef.current, p)
+        }, 300)
+      }
+      nextLeg()
+    } else endRun()   // stopped part-way: the walker has said why in the game window
+  }, [walkStatus, run?.i]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const cancelRun = useCallback(() => {
+    const r = runRef.current, leg = r?.legs[r.i]
+    if (leg?.kind === 'go2') onSendCommand(';kill go2')
+    else walkApi?.stop()
+    endRun()
+  }, [onSendCommand, walkApi, endRun])
+
+  /** Right-click: `;go2`, or a route when either end is a "?" square. */
+  const goTo = (r: DaRoom) => {
+    if (r.stubTo) { if (r.goTo != null) onSendCommand(`;go2 ${r.goTo}`); return }
+    if (!area) return
+    const plan = planDaRoute(area, hereRoom?.id ?? null, r.id)
+    if (plan === null) { if (r.lich !== null) onSendCommand(`;go2 ${r.lich}`); return }
+    const label = r.title || 'that room'
+    if ('error' in plan) { showToast({ kind: 'warning', title: `Can't walk to ${label}`, message: plan.error[0].toUpperCase() + plan.error.slice(1) + '.' }); return }
+    if (!walkApi) { showToast({ kind: 'warning', title: `Can't walk to ${label}`, message: 'Walking isn\'t available here.' }); return }
+    if (runRef.current) cancelRun()
+    startLeg({ label, area: area.image, legs: plan.legs, i: 0, seen: false, done: 0, total: 0 }, 0)
+  }
+  const goToRef = useRef(goTo)
+  goToRef.current = goTo
 
   // Switching views: Global remembers where you left it; on first open it
   // centres on the area you're in. Local re-fits its area when you come back.
@@ -497,9 +681,17 @@ function DaMapsCanvas({ world: daWorld, lichDb, currentRoom, character, onSendCo
       const s = r.size
       return (
         <g key={r.id}>
+          {hasArt && (
+            // Over painted art a grey square can sink into grey stone, so it
+            // gets a dark rim with a pale edge on top: it reads on light
+            // pavement and dark roofs alike, and changes nothing without art.
+            <rect x={r.x - s / 2} y={r.y - s / 2} width={s} height={s} fill="none"
+              stroke="rgba(0,0,0,0.7)" strokeWidth={3} vectorEffect="non-scaling-stroke" pointerEvents="none" />
+          )}
           <rect x={r.x - s / 2} y={r.y - s / 2} width={s} height={s}
             fill={fill ?? 'var(--map-node-fill, #2a2a2a)'}
-            stroke={fill ? 'none' : 'var(--map-node-stroke, #555)'} strokeWidth={1} vectorEffect="non-scaling-stroke"
+            stroke={fill ? (hasArt ? 'rgba(255,255,255,0.45)' : 'none') : hasArt ? 'rgba(235,235,235,0.85)' : 'var(--map-node-stroke, #555)'}
+            strokeWidth={1} vectorEffect="non-scaling-stroke"
             strokeDasharray={r.lich === null && !r.stubTo ? '1.5 1.5' : undefined}
             style={{ cursor: 'pointer' }}
             onMouseEnter={() => { if (!dragRef.current?.moved) { setHoverId(r.id); setHoverBuilding(null) } }}
@@ -509,7 +701,7 @@ function DaMapsCanvas({ world: daWorld, lichDb, currentRoom, character, onSendCo
               setPinnedId(p => (p === r.id ? null : r.id))
               setTab('room'); setShowPanel(true)
             }}
-            onContextMenu={e => { e.preventDefault(); const to = r.lich ?? r.goTo; if (to != null) onSendCommand(`;go2 ${to}`) }}
+            onContextMenu={e => { e.preventDefault(); goToRef.current(r) }}
           />
           {r.stubTo && (
             <text x={r.x} y={r.y} fontSize={s + 2} fontWeight="bold" fill="var(--map-arc-special, #ffb74d)"
@@ -523,7 +715,7 @@ function DaMapsCanvas({ world: daWorld, lichDb, currentRoom, character, onSendCo
         </g>
       )
     })
-  }, [area, showIndoor, onSendCommand, src]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [area, showIndoor, hasArt, src]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const labels = useMemo(() => {
     if (!area) return null
@@ -639,9 +831,9 @@ function DaMapsCanvas({ world: daWorld, lichDb, currentRoom, character, onSendCo
   }, [world]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const globalHere = (() => {
-    if (!world || !currentRoom || !hereImage) return null
+    if (!world || !hereImage) return null
     const wa = world.byImage.get(hereImage)
-    const r = wa?.area.byLich.get(currentRoom.id)
+    const r = currentRoom ? wa?.area.byLich.get(currentRoom.id) : unmappedHere ? wa?.area.byId.get(unmappedHere.square) : undefined
     if (!wa || !r) return null
     const cx = wa.ox + r.x * wa.s, cy = wa.oy + r.y * wa.s
     return (
@@ -716,7 +908,7 @@ function DaMapsCanvas({ world: daWorld, lichDb, currentRoom, character, onSendCo
         <>
           <div style={{ fontWeight: 'bold' }}>{r.title || '(unnamed room)'}</div>
           <div style={{ ...muted, marginTop: 6 }}>
-            Not in Lich's map yet, so go2 can't take you there.
+            Not in Lich's map yet. Right-click to walk there: go2 takes you as far as it can, then Lichborne walks the rest.
           </div>
         </>
       )
@@ -826,6 +1018,22 @@ function DaMapsCanvas({ world: daWorld, lichDb, currentRoom, character, onSendCo
         </div>
       )}
 
+      {run && (() => {
+        const leg = run.legs[run.i]
+        const what = leg.kind === 'go2'
+          ? `go2 to ${src.area(run.area)?.byId.get(leg.to)?.title ?? `Lich #${leg.lich}`}`
+          : `walking ${leg.moves.length} step${leg.moves.length === 1 ? '' : 's'}`
+        return (
+          <div className="map-hint" style={{ padding: '3px 8px', flexShrink: 0, display: 'flex', alignItems: 'center', gap: 8 }}
+            title={'A "?" room isn\'t in Lich\'s map, so go2 does what it can and Lichborne walks the rest.'}>
+            <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              Walking to {run.label}: {what}{run.legs.length > 1 ? ` (part ${run.i + 1} of ${run.legs.length})` : ''}
+            </span>
+            <button className="map-btn map-btn--sm" onClick={cancelRun} title="Stop this walk">Stop</button>
+          </div>
+        )
+      })()}
+
       <div style={{ flex: 1, overflow: 'hidden', position: 'relative' }}>
         {mode === 'local' && !area && (
           <div className="map-overlay" style={{ pointerEvents: 'none' }}>
@@ -916,9 +1124,9 @@ function DaMapsCanvas({ world: daWorld, lichDb, currentRoom, character, onSendCo
                       <rect x={1} y={1} width={12} height={12} fill="var(--map-node-fill, #2a2a2a)" stroke="var(--map-node-stroke, #555)" strokeDasharray="1.5 1.5" />
                       <text x={7} y={7.5} fontSize={10} fontWeight="bold" fill="var(--map-text, #ddd)" textAnchor="middle" dominantBaseline="central">?</text>
                     </svg>
-                    <span style={muted}>Not in Lich's map yet (no go2)</span>
+                    <span style={muted}>Not in Lich's map yet (go2 gets you close, Lichborne walks the rest)</span>
                   </div>
-                  <div style={{ ...muted, marginTop: 8 }}>Right-click any room to <code>;go2</code> there.</div>
+                  <div style={{ ...muted, marginTop: 8 }}>Right-click any room to <code>;go2</code> there. A "?" room is walked: go2 does the part Lich knows, then Lichborne takes the steps go2 can't.</div>
                 </>
               )}
               {tab === 'room' && mode === 'global' && !province && (

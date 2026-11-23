@@ -89,6 +89,10 @@ for (const zone of merged.zones.values()) {
       // a place name far outside the map (a stray label in the source) is dropped
       texts: (a.texts ?? []).filter(t => nearRooms(a.rooms, t.x, t.y)).map(t => [t.text, t.x, t.y]),
       buildings: a.buildings.map(b => [b.name, r1(b.x1), r1(b.y1), r1(b.x2), r1(b.y2), b.rooms, b.outline ? 1 : 0]),
+      moves: [...(a.moves ?? [])].map(([k, m]): [number, number, string] => {
+        const [f, t] = k.split('>').map(Number)
+        return [f, t, m]
+      }),
     })
   }
 }

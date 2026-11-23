@@ -154,6 +154,10 @@ export interface DaArea {
   byLich:    Map<number, DaRoom>
   /** free-standing place names drawn by the map maker (the map file) */
   texts?:    { text: string; x: number; y: number }[]
+  /** The Genie map's move from one square to another, where either end isn't
+   *  in Lich's map (a "?" square), keyed `from>to`: go2 can't walk those, so
+   *  Da'Maps' walk does (damaps/daMapsWalk.ts). */
+  moves?:    Map<string, string>
 }
 
 /** "zoluren-1-crossing-1377284934.png" → "Zoluren 1 Crossing". */

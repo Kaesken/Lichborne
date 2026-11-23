@@ -1188,6 +1188,8 @@ export default memo(function MapPanel({ roomTitle = '', roomDesc = '', roomExits
             lichDb={lichDb}
             currentRoom={currentRoom}
             character={character}
+            roomTitle={roomTitle}
+            roomId={roomId}
             onSendCommand={onSendCommand}
           />
         </DaMapsBoundary>
