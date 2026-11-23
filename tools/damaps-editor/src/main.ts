@@ -2,10 +2,11 @@
 // dialogs. All editing happens in the window (renderer.ts); this side only
 // reads and writes files and asks before closing with unsaved changes.
 
-import { app, BrowserWindow, Menu, dialog, ipcMain, shell } from 'electron'
+import { app, BrowserWindow, Menu, dialog, ipcMain, shell, net } from 'electron'
 import fs from 'node:fs'
 import path from 'node:path'
 import { decodeMapFile } from '../../damaps/readGenieXml'
+import { planUpdate, applyUpdate, type Record_ } from './officialMaps'
 
 let win: BrowserWindow | null = null
 let dirty = false
@@ -41,6 +42,7 @@ function menu() {
       { label: 'New map', click: () => send('new') },
       { label: 'Open…', click: () => send('open') },
       { label: 'Import Genie map…', click: () => send('import') },
+      { label: 'Get latest maps…', click: () => getLatestMaps() },
       { type: 'separator' },
       { label: 'Save', click: () => send('save') },
       { label: 'Save as…', click: () => send('save-as') },
@@ -66,25 +68,81 @@ function menu() {
 }
 
 /**
- * Where maps are kept: a My Maps folder beside the program (the portable exe sets
- * PORTABLE_EXECUTABLE_DIR; the installed folder keeps the program in Program\\),
- * else Documents\DaMaps when run from source.
+ * Where maps are kept:
+ *  - the portable exe: a My Maps folder beside it (it sets PORTABLE_EXECUTABLE_DIR);
+ *  - a program folder with a My Maps folder beside it (<DaMaps Editor>\\Program
+ *    and <DaMaps Editor>\\My Maps, the hand-installed layout): that folder;
+ *  - otherwise (the installer, or run from source): Documents\\DaMaps. An
+ *    installed program's own folder is replaced on update, so maps never go there.
  */
 function mapsFolder() {
   const portable = process.env.PORTABLE_EXECUTABLE_DIR
-  // installed as a folder: <DaMaps Editor>\Program\DaMaps Editor.exe, maps in <DaMaps Editor>\My Maps
+  const beside = path.join(path.dirname(process.execPath), '..', 'My Maps')
   const dir = portable ? path.join(portable, 'My Maps')
-    : app.isPackaged ? path.join(path.dirname(process.execPath), '..', 'My Maps')
+    : app.isPackaged && fs.existsSync(beside) ? beside
     : path.join(app.getPath('documents'), 'DaMaps')
   fs.mkdirSync(dir, { recursive: true })
   return dir
 }
+
+// ── Get latest maps ─────────────────────────────────────────────────────────
+
+const recordFile = () => path.join(app.getPath('userData'), 'official-maps.json')
+function loadRecord(): Record_ {
+  try { return JSON.parse(fs.readFileSync(recordFile(), 'utf8')) } catch { return {} }
+}
+function saveRecord(r: Record_) {
+  const tmp = recordFile() + '.tmp'
+  fs.writeFileSync(tmp, JSON.stringify(r, null, 1))
+  fs.renameSync(tmp, recordFile())
+}
+let updating = false
+async function getLatestMaps() {
+  if (!win || updating) return
+  updating = true
+  win.webContents.send('status', 'Checking Lichborne\'s GitHub for the latest maps…')
+  try {
+    const folder = mapsFolder()
+    const record = loadRecord()
+    const r = await planUpdate(folder, record, (url, init) => net.fetch(url, init) as never)
+    if ('error' in r) { dialog.showMessageBox(win, { type: 'info', message: 'Get latest maps', detail: r.error }); return }
+    const { plan, texts } = r
+    saveRecord(record)   // remembers maps already up to date
+    const names = (xs: { name: string }[]) => xs.map(x => '  • ' + x.name).slice(0, 15).join('\n') + (xs.length > 15 ? `\n  …and ${xs.length - 15} more` : '')
+    if (!plan.added.length && !plan.updated.length && !plan.changedByYou.length) {
+      dialog.showMessageBox(win, { type: 'info', message: 'Your maps are up to date.', detail: `All ${plan.same} official maps match the ones in ${folder}.` })
+      return
+    }
+    const parts: string[] = []
+    if (plan.added.length) parts.push(`New maps (${plan.added.length}):\n${names(plan.added)}`)
+    if (plan.updated.length) parts.push(`Updated maps (${plan.updated.length}):\n${names(plan.updated)}`)
+    if (plan.changedByYou.length) parts.push(`You've changed these, and they also have a newer official version (${plan.changedByYou.length}):\n${names(plan.changedByYou)}`)
+    const buttons = plan.changedByYou.length
+      ? ['Update, keep my changed maps', 'Update and replace my changed maps', 'Cancel']
+      : ['Update', 'Cancel']
+    const choice = (await dialog.showMessageBox(win, {
+      type: 'question', message: 'Get latest maps', detail: parts.join('\n\n'), buttons, defaultId: 0, cancelId: buttons.length - 1, noLink: true,
+    })).response
+    if (choice === buttons.length - 1) return
+    const written = applyUpdate(folder, plan, texts, record, choice === 1 && plan.changedByYou.length > 0)
+    saveRecord(record)
+    win.webContents.send('maps-updated', written)
+    dialog.showMessageBox(win, { type: 'info', message: `${written.length} map${written.length === 1 ? '' : 's'} updated.`, detail: `In ${folder}` })
+  } catch (e) {
+    dialog.showMessageBox(win, { type: 'error', message: 'Couldn\'t get the latest maps', detail: `${(e as Error).message}\n\nCheck your internet connection and try again.` })
+  } finally {
+    updating = false
+    win?.webContents.send('status', '')
+  }
+}
+ipcMain.on('get-latest', () => { getLatestMaps() })
 
 ipcMain.handle('open', async () => {
   const r = await dialog.showOpenDialog(win!, { title: 'Open a map', defaultPath: mapsFolder(), filters: [{ name: 'Da\'Maps map', extensions: ['damap'] }], properties: ['openFile'] })
   if (r.canceled || !r.filePaths[0]) return null
   return { path: r.filePaths[0], text: fs.readFileSync(r.filePaths[0], 'utf8') }
 })
+ipcMain.handle('reopen', (_e, p: string) => { try { return fs.readFileSync(p, 'utf8') } catch { return null } })
 ipcMain.handle('import', async () => {
   const r = await dialog.showOpenDialog(win!, { title: 'Import a Genie map', filters: [{ name: 'Genie map', extensions: ['xml'] }], properties: ['openFile'] })
   if (r.canceled || !r.filePaths[0]) return null

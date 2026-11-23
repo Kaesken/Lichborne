@@ -10,4 +10,8 @@ contextBridge.exposeInMainWorld('api', {
   setTitle: (t: string) => ipcRenderer.send('title', t),
   closeNow: () => ipcRenderer.send('close-now'),
   onMenu: (fn: (action: string) => void) => ipcRenderer.on('menu', (_e, a: string) => fn(a)),
+  getLatest: () => ipcRenderer.send('get-latest'),
+  onStatus: (fn: (text: string) => void) => ipcRenderer.on('status', (_e, t: string) => fn(t)),
+  onMapsUpdated: (fn: (paths: string[]) => void) => ipcRenderer.on('maps-updated', (_e, p: string[]) => fn(p)),
+  reopen: (path: string) => ipcRenderer.invoke('reopen', path),
 })

@@ -24,6 +24,10 @@ interface Api {
   setTitle(t: string): void
   closeNow(): void
   onMenu(fn: (action: string) => void): void
+  getLatest(): void
+  onStatus(fn: (text: string) => void): void
+  onMapsUpdated(fn: (paths: string[]) => void): void
+  reopen(path: string): Promise<string | null>
 }
 const api = (window as unknown as { api: Api }).api
 
@@ -671,6 +675,16 @@ $('#undo').onclick = undo
 $('#redo').onclick = redo
 $('#save').onclick = () => save(false)
 $('#help-close').onclick = () => { $('#help').hidden = true }
+$('#latest').onclick = () => api.getLatest()
+api.onStatus(t => { if (t) status.textContent = t; else updateStatus() })
+// The open map was among those just updated from GitHub: reload it, unless
+// there are unsaved changes (then say so and leave them alone).
+api.onMapsUpdated(async paths => {
+  if (!filePath || !paths.some(p => p.toLowerCase() === filePath!.toLowerCase())) return
+  if (dirty) { alert('The map you have open was just updated from GitHub. Your unsaved changes are still here; saving will replace the update with your version.'); return }
+  const text = await api.reopen(filePath)
+  if (text) try { load(parseDamap(text), filePath) } catch { /* keep what's on screen */ }
+})
 new ResizeObserver(() => updateStatus()).observe(svg)
 
 setTool('select')

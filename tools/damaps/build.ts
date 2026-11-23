@@ -10,6 +10,7 @@
 
 import fs from 'node:fs'
 import path from 'node:path'
+import { createHash } from 'node:crypto'
 import type { GenieZone, LichRoom } from '../../src/renderer/components/panels/mapTypes'
 import { areaProvince } from '../../src/renderer/components/panels/damaps/daMapsData'
 import {
@@ -90,6 +91,15 @@ for (const { zone, includes } of damaps) {
   for (const f of includes) fileToZone.set(f.toLowerCase(), zone.id)
 }
 if (damaps.length) console.log(`.damap maps: ${damaps.length} (${replaced} Genie files they cover were skipped)`)
+// index.json beside the maps: their names and git blob ids, read by the DaMaps
+// Editor's "Get latest maps" from GitHub's file server (no API rate limit).
+if (damapDir && fs.existsSync(damapDir)) {
+  const maps = fs.readdirSync(damapDir).filter(f => f.toLowerCase().endsWith('.damap')).sort().map(name => {
+    const buf = fs.readFileSync(path.join(damapDir, name))
+    return { name, sha: createHash('sha1').update(`blob ${buf.length}\0`).update(buf).digest('hex') }
+  })
+  fs.writeFileSync(path.join(damapDir, 'index.json'), JSON.stringify({ about: 'Written by tools/damaps/build-damaps.mjs; read by the DaMaps Editor.', maps }, null, 1) + '\n')
+}
 
 const keysOf = new Map<number, string>()
 for (const [lid, nodes] of match.nodesOf) {
