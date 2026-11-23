@@ -16,13 +16,14 @@ import {
   DA_WORLD_VERSION, type DaWorldArea, type DaWorldFile, type DaWorldRoom,
 } from '../../src/renderer/components/panels/damaps/damapsWorld'
 import { readGenieXml } from './readGenieXml'
+import { parseDamap, damapToZone } from './damapFormat'
 import { mergeSubMaps } from './genieMerge'
 import { matchGenieToLich } from './genieMatch'
 import { buildGenieArea, genieAreaKey, genieLevels, zoneIdByFile } from './genieArea'
 
-const [mapsDir, lichFile, outFile] = process.argv.slice(2)
+const [mapsDir, lichFile, outFile, damapArg] = process.argv.slice(2)
 if (!mapsDir || !lichFile || !outFile) {
-  console.error('usage: build-damaps <Genie maps folder> <Lich map-NNNN.json> <out.json>')
+  console.error('usage: build-damaps <Genie maps folder> <Lich map-NNNN.json> <out.json> [.damap folder]')
   process.exit(1)
 }
 
@@ -31,11 +32,36 @@ const lichRooms: LichRoom[] = JSON.parse(fs.readFileSync(lichFile, 'utf8'))
 const lichDb = new Map(lichRooms.map(r => [r.id, r]))
 
 const files = fs.readdirSync(mapsDir).filter(f => f.toLowerCase().endsWith('.xml')).sort()
+
+// Da'Maps' own maps (.damap, made in the DaMaps Editor) live in the repo, in
+// tools/damaps/maps/. One whose `file` names a Genie map replaces that map;
+// any other is added.
+const damapDir = damapArg ?? ''
+const damaps = new Map<string, GenieZone>()
+if (damapDir && fs.existsSync(damapDir)) {
+  for (const f of fs.readdirSync(damapDir).filter(f => f.toLowerCase().endsWith('.damap')).sort()) {
+    try {
+      const z = damapToZone(parseDamap(fs.readFileSync(path.join(damapDir, f), 'utf8')))
+      if (damaps.has(z.sourceFile.toLowerCase())) { console.warn(`skipped ${f}: another .damap is already ${z.sourceFile}`); continue }
+      damaps.set(z.sourceFile.toLowerCase(), z)
+    } catch (e) { console.warn(`skipped ${f}: ${(e as Error).message}`) }
+  }
+}
+const sourceNames = [...new Set([...files, ...[...damaps.values()].map(z => z.sourceFile)].map(f => f.toLowerCase()))]
+  .map(lc => files.find(f => f.toLowerCase() === lc) ?? damaps.get(lc)!.sourceFile).sort()
+
 const zones = new Map<string, GenieZone>()
-for (const f of files) {
+let replaced = 0, added = 0
+for (const f of sourceNames) {
   let z: GenieZone
-  try { z = readGenieXml(fs.readFileSync(path.join(mapsDir, f), 'utf8'), f) }
-  catch (e) { console.warn(`skipped ${f}: ${(e as Error).message}`); continue }
+  const own = damaps.get(f.toLowerCase())
+  if (own) {
+    z = own
+    if (files.some(x => x.toLowerCase() === f.toLowerCase())) replaced++; else added++
+  } else {
+    try { z = readGenieXml(fs.readFileSync(path.join(mapsDir, f), 'utf8'), f) }
+    catch (e) { console.warn(`skipped ${f}: ${(e as Error).message}`); continue }
+  }
   if (!z.nodes.length) continue
   // the same id in two files (an old event copy beside the current map) gets a suffix
   let id = z.id || f
@@ -108,12 +134,13 @@ for (const a of areas) for (const r of a.rooms) {
 const out: DaWorldFile = {
   version: DA_WORLD_VERSION,
   made: new Date().toISOString().slice(0, 10),
-  sources: { maps: `${files.length} Genie map files`, lich: path.basename(lichFile) },
+  sources: { maps: `${files.length} Genie map files` + (damaps.size ? ` + ${damaps.size} .damap` : ''), lich: path.basename(lichFile) },
   stats: { areas: areas.length, squares, matched },
   areas,
 }
 fs.mkdirSync(path.dirname(outFile), { recursive: true })
 fs.writeFileSync(outFile, JSON.stringify(out))
 console.log(`Da'Maps: ${areas.length} areas, ${squares} squares, ${matched} matched to Lich (${(100 * matched / squares).toFixed(1)}%), ${lone} without a line`)
+if (damaps.size) console.log(`.damap maps: ${replaced} replaced a Genie map, ${added} added`)
 console.log(`folded in: ${[...merged.parentOf].map(([c, p]) => `${c}→${p}`).join(' ')}`)
 console.log(`wrote ${outFile} (${(fs.statSync(outFile).size / 1e6).toFixed(2)} MB)`)

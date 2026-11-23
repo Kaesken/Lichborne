@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'">
+<title>DaMaps Editor</title>
+<link rel="stylesheet" href="editor.css">
+</head>
+<body>
+<div id="app">
+  <header id="toolbar">
+    <div class="group" id="tools">
+      <button data-tool="select" title="Select and move (V). Drag a room to move it; drag on empty space to select several; Shift-click adds to the selection.">⬚ Select</button>
+      <button data-tool="room" title="Add rooms (R). Click to place a room. Shift-click places one and links it to the selected room.">■ Room</button>
+      <button data-tool="link" title="Link rooms (L). Drag from one room to another to add exits both ways. Hold Shift for a one-way exit.">╱ Link</button>
+      <button data-tool="label" title="Add a place name (T). Click where the text should go.">A Label</button>
+    </div>
+    <div class="group">
+      <label title="Floor shown. Rooms on other floors are hidden; up/down exits show as ▲ ▼.">Floor
+        <select id="floor"></select>
+      </label>
+      <button id="floor-add" title="Start a new floor above the highest one">+ Floor</button>
+    </div>
+    <div class="group">
+      <label title="Rooms snap to this grid when placed or moved. Hold Alt while dragging to place freely.">Snap
+        <select id="snap"><option value="0">Off</option><option value="5">5</option><option value="10" selected>10</option><option value="20">20</option></select>
+      </label>
+      <button id="fit" title="Fit the map to the window (F)">⤢ Fit</button>
+    </div>
+    <div class="spacer"></div>
+    <div class="group">
+      <button id="undo" title="Undo (Ctrl+Z)">↶</button>
+      <button id="redo" title="Redo (Ctrl+Y)">↷</button>
+      <button id="save" class="primary" title="Save (Ctrl+S)">Save</button>
+    </div>
+  </header>
+  <main>
+    <div id="canvas-wrap">
+      <svg id="canvas" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+          <pattern id="grid" width="10" height="10" patternUnits="userSpaceOnUse"><path d="M10 0H0V10" fill="none" class="grid-line"/></pattern>
+        </defs>
+        <g id="view">
+          <rect id="grid-bg" x="-100000" y="-100000" width="200000" height="200000" fill="url(#grid)"/>
+          <g id="layer-lines"></g>
+          <g id="layer-rooms"></g>
+          <g id="layer-labels"></g>
+          <g id="layer-ui"></g>
+        </g>
+      </svg>
+      <div id="status"></div>
+    </div>
+    <aside id="props"></aside>
+  </main>
+</div>
+<div id="help" hidden>
+  <div class="help-card">
+    <h2>DaMaps Editor</h2>
+    <p>Make and change maps for Da'Maps. When you're happy with a map, save it and send the <b>.damap</b> file to be added to Lichborne.</p>
+    <h3>Tools</h3>
+    <ul>
+      <li><b>Select (V)</b> — click a room to edit it on the right. Drag rooms to move them. Drag on empty space to select several. Shift-click adds to the selection.</li>
+      <li><b>Room (R)</b> — click to place a room. <b>Shift-click</b> places one and links it to the room you had selected, so you can draw a street room by room.</li>
+      <li><b>Link (L)</b> — drag from one room to another. That adds an exit each way, named by the direction of the drag. Hold <b>Shift</b> for one way only.</li>
+      <li><b>Label (T)</b> — click to put a place name on the map.</li>
+    </ul>
+    <h3>Moving around</h3>
+    <ul>
+      <li>Mouse wheel zooms. Drag with the right or middle button (or hold Space) to move the map. <b>F</b> fits the map to the window.</li>
+      <li>Arrow keys nudge the selected rooms; Shift+arrow nudges further.</li>
+      <li><b>Del</b> deletes the selection. <b>Ctrl+Z</b> / <b>Ctrl+Y</b> undo and redo. <b>Ctrl+S</b> saves.</li>
+    </ul>
+    <h3>Rooms</h3>
+    <ul>
+      <li>Give each room its title and description exactly as the game shows them; that's how Da'Maps finds where you are.</li>
+      <li><b>Doorway to</b> makes a square a doorway onto another map (give that map's file name).</li>
+      <li><b>Lich room #</b> is optional: fill it in only when Da'Maps matches the room to the wrong Lich room.</li>
+    </ul>
+    <p class="help-close"><button id="help-close" class="primary">Got it</button></p>
+  </div>
+</div>
+<script src="renderer.js"></script>
+</body>
+</html>

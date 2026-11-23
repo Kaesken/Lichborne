@@ -3,6 +3,7 @@
 //
 //   node tools/damaps/build-damaps.mjs <Genie maps folder> <Lich map-NNNN.json>
 //
+// Also reads Da'Maps' own .damap maps from tools/damaps/maps/ (see damapFormat.ts).
 // Writes src/renderer/public/damaps-world.json, which
 // is committed. Bundles build.ts with esbuild (already a dev dependency) and
 // runs it.
@@ -21,4 +22,5 @@ if (!mapsDir || !lichFile) {
 const bundle = path.join(here, '.build-damaps.cjs')
 await build({ entryPoints: [path.join(here, 'build.ts')], bundle: true, platform: 'node', format: 'cjs', outfile: bundle, logLevel: 'error' })
 const out = path.join(root, 'src/renderer/public/damaps-world.json')
-execFileSync(process.execPath, [bundle, path.resolve(mapsDir), path.resolve(lichFile), out], { stdio: 'inherit' })
+// Da'Maps' own maps (.damap files from the DaMaps Editor) are read from tools/damaps/maps/.
+execFileSync(process.execPath, [bundle, path.resolve(mapsDir), path.resolve(lichFile), out, path.join(here, 'maps')], { stdio: 'inherit' })

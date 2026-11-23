@@ -4553,6 +4553,12 @@ The file keeps rooms as `[id, lich id, x, y, fill, marker target, title]`, lines
 
 **Forage capture.** `GameWindow` calls `daMapsObserveCommand` from `noteSentRef` and `daMapsObserveLine` for each main-stream line; both are no-ops unless FORAGE was sent in the last 10 s. Finds are filed under the room `MapPanel` last resolved (`daMapsSetRoom`) and stored in `localStorage['lichborne.damaps.observations.v1']` (shared across characters — it describes the world). The FORAGE line patterns are a first guess and need checking against real game text.
 
+**Da'Maps' own map files and the DaMaps Editor (Kaesken, 2026-11-23).** Maps can now be made and changed without Genie: the **DaMaps Editor** ([tools/damaps-editor/](../tools/damaps-editor/), a separate Windows program, not part of Lichborne) saves `.damap` files, and the build reads every one in [tools/damaps/maps/](../tools/damaps/maps/). The flow is: Kaesken edits and saves, sends the file, it goes into that folder, the build is re-run and the result goes in a PR.
+- **Format** ([damapFormat.ts](../tools/damaps/damapFormat.ts)): pretty JSON, one map with all its floors. Each room has id, x/y/z, title, descriptions, colour, other names, an optional `linksTo` (doorway to another map by file name) and `lich` (a Lich room number, overriding the automatic match), plus exits (`to`, `exit`, `move`, `hidden`). Rooms are written in id order so a change diffs cleanly. `parseDamap` refuses a newer version.
+- **Build** ([build.ts](../tools/damaps/build.ts)): `damapToZone` turns a `.damap` into the same `GenieZone` a Genie XML file becomes, so Lich matching, sub-map folding, outlines and the `?` walks are unchanged. A `.damap` whose `file` names a Genie map replaces it; any other is added. `lichId` on a node skips matching in `matchGenieToLich`.
+- **Checked:** with no `.damap` files the build output is identical; the Crossing imported into the editor and saved builds identically to the Genie original; a hand-set `lich` and a brand-new map both come through.
+- **Editor:** Electron (bundled from Lichborne's own electron and esbuild), SVG canvas, tools Select / Room (Shift-click links to the selected room) / Link (drag; Shift for one way) / Label, floors, grid snap, undo/redo, a properties panel, and the `checkDamap` warnings. Rooms and lines only, no painted art, by decision. Packaged as a portable exe with `node tools/damaps-editor/build.mjs --pack` (no code signing, so the exe has Electron's icon and Windows may warn on first run).
+
 ### 19.12 Future Work
 
 | Item | Notes |
