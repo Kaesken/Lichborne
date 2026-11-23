@@ -1,9 +1,9 @@
 {
  "format": "damap",
  "version": 1,
- "id": "502",
+ "id": "502~1",
  "name": "The Seacaves of Peri'el",
- "file": "Map502_The_Seacaves_of_Peri'el.xml",
+ "file": "The_Seacaves_of_Peri'el.xml",
  "rooms": [
   {"id":1,"x":100,"y":100,"z":0,"title":"The Seacaves of Peri'el, Sandy Beach","descriptions":["The beach narrows and finally straggles to a stop at the jagged rocks marking the edge of the cliff.  A strutting gaggle of sandpipers weaves between the rocks, picking at the tiny morsels washed up on the sand.  A small path leads northwest toward a raised ledge that is just high enough for a small stage."],"exits":[{"to":2,"exit":"east","move":"east"},{"to":23,"exit":"go","move":"go cave mouth"},{"to":25,"exit":"go","move":"go small path"}]},
   {"id":2,"x":120,"y":100,"z":0,"title":"The Seacaves of Peri'el, Sandy Beach","descriptions":["Strands of seaweed and broken seashells litter the soft sand.  A few hardy tufts of sawgrass snuggle among the rocks near the cliff and cling to the hard ridge of sand marking high tide.  The waves splash against the beach, sending an invitation to play in the surf."],"exits":[{"to":3,"exit":"east","move":"east"},{"to":1,"exit":"west","move":"west"},{"to":26,"exit":"go","move":"go water"}]},

@@ -244,9 +244,10 @@ function renderProps() {
 function renderMapProps() {
   props.append(h('h2', {}, 'Map'))
   props.append(field('Name', textBox(map.name, v => { map.name = v; updateTitle() }), 'The map\'s name as players will see it'))
-  props.append(field('File name', textBox(map.file, v => { map.file = v }), 'Doorways on other maps point at this name. For a map that replaces a Genie map, keep the Genie file name (e.g. Map1_Crossing.xml).'))
-  props.append(field('Map id', textBox(map.id, v => { map.id = v }), 'A short id, e.g. 1 for the Crossing. Keep the Genie id when the map came from Genie.'))
-  props.append(h('p', { class: 'hint' }, 'A map that keeps a Genie map\'s file name replaces that map in Da\'Maps. A new file name adds a new map.'))
+  props.append(field('Link name', textBox(map.file, v => { map.file = v }), 'How Da\'Maps and other maps\' doorways know this map. Not the name of the .damap file.'))
+  props.append(field('Map id', textBox(map.id, v => { map.id = v }), 'A short id, e.g. 1 for the Crossing. Da\'Maps uses it to remember where you were.'))
+  props.append(h('p', { class: 'hint' }, 'Rename the .damap file however you like. Leave the link name and map id as they are on an existing map: doorways on other maps point at the link name.'))
+  if (map.includes?.length) props.append(h('p', { class: 'hint' }, `Also takes in: ${map.includes.map(f => f.replace(/\.xml$/i, '')).join(', ')}`))
   props.append(h('h2', {}, 'Check'))
   const probs = checkDamap(map)
   if (!map.rooms.length) props.append(h('p', { class: 'hint' }, 'No rooms yet. Pick the Room tool (R) and click to place one.'))
@@ -630,7 +631,7 @@ async function importGenie() {
 }
 async function save(saveAs: boolean): Promise<boolean> {
   ;(document.activeElement as HTMLElement | null)?.blur?.()
-  const suggested = (map.file || map.name || 'map').replace(/\.xml$/i, '').replace(/[\\/:*?"<>|]+/g, '_') + '.damap'
+  const suggested = (map.name || map.file.replace(/\.xml$/i, '') || 'Map').replace(/[\\/:*?"<>|]+/g, '').replace(/\s+/g, '_') + '.damap'
   try {
     const p = await api.save(saveAs ? null : filePath, stringifyDamap(map), suggested)
     if (!p) return false

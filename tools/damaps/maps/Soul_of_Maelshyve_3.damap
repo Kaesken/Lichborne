@@ -1,9 +1,9 @@
 {
  "format": "damap",
  "version": 1,
- "id": "105",
+ "id": "501~2",
  "name": "Soul of Maelshyve",
- "file": "Map105_Soul_of_Maelshyve.xml",
+ "file": "Soul_of_Maelshyve.xml",
  "rooms": [
   {"id":1,"x":100,"y":140,"z":0,"title":"Soul of Maelshyve, The Involution","descriptions":["The path stretches to the northeast, hanging in space, extending from a wall of silver liquid.  Though the path is wide and solid, it flows like melted wax, and the sides end abruptly, with strange forms shifting in the endless distance.  A flickering image of Maelshyve's Fortress stretches and contracts in the sky, where the heights billow with the jagged drip-drip-drip of screaming sunbursts, accosting your senses with the incomprehensible.  The air seems to be made of murky smoke, stirred by a weak breeze and rhythmically congealing into vaguely familiar shapes.","The path stretches to the northeast, hanging in space, extending from a wall of silver liquid.  Flowing like melted wax, the sides of the path end abruptly, and strange forms shift in the endless distance.  High above, a flickering image of Maelshyve's Fortress hangs in the sky, where screaming sunbursts accost your senses.  The air is thick and murky, gently stirred by the breeze."],"exits":[{"to":2,"exit":"northeast","move":"northeast"},{"to":52,"exit":"go","move":"go silver liquid"}],"aliases":["Involution"]},
   {"id":2,"x":140,"y":100,"z":0,"title":"Soul of Maelshyve, The Involution","descriptions":["The waxen path curves gently, stretching to the southwest and east.  Embedded in its center is a slowly turning millstone shaped from rough red material that appears damp.  An endless thunder, the scent of iron and limestone rise on a faint wisp of powder escaping around the stone's edges.  Far above, a barely visible vortex churns the choking haze, spinning at pace with the millstone.","The path curves gently, stretching to the southwest and east.  Embedded in its center is a slowly turning millstone.  Thundering ceaselessly, the scent of iron and limestone rise faintly around the stone's edges.  Above, a vortex churns the choking haze."],"exits":[{"to":1,"exit":"southwest","move":"southwest"},{"to":3,"exit":"east","move":"east"}]},

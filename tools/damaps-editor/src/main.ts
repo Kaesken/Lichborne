@@ -66,12 +66,12 @@ function menu() {
 }
 
 /**
- * Where maps are kept: a Maps folder beside the program (the portable exe sets
+ * Where maps are kept: a My Maps folder beside the program (the portable exe sets
  * PORTABLE_EXECUTABLE_DIR), else Documents\DaMaps when run from source.
  */
 function mapsFolder() {
   const beside = process.env.PORTABLE_EXECUTABLE_DIR
-  const dir = beside ? path.join(beside, 'Maps') : path.join(app.getPath('documents'), 'DaMaps')
+  const dir = beside ? path.join(beside, 'My Maps') : path.join(app.getPath('documents'), 'DaMaps')
   fs.mkdirSync(dir, { recursive: true })
   return dir
 }

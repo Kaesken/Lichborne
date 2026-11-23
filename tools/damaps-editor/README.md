@@ -7,7 +7,7 @@ reads from [`tools/damaps/maps/`](../damaps/maps/).
 ## Using it
 
 1. Open **DaMaps Editor.exe**. It needs no install.
-2. Open a map from the **Maps** folder beside the program (**File → Open…**),
+2. Open a map from the **My Maps** folder beside the program (**File → Open…**),
    start a new one (**File → New map**), or **File → Import Genie map…**.
 3. Edit with the four tools:
    - **Select (V)**: click a room to edit it on the right; drag to move; drag on empty space to select several.
@@ -16,13 +16,14 @@ reads from [`tools/damaps/maps/`](../damaps/maps/).
    - **Label (T)**: click to place a place name.
 4. Give every room its title and description exactly as the game shows them.
    That's how Da'Maps finds where you are.
-5. **Save**. Maps go to the **Maps** folder beside the program unless you pick somewhere else.
+5. **Save**. Maps go to the **My Maps** folder beside the program unless you pick somewhere else.
 6. Send the `.damap` file to be added. It goes into `tools/damaps/maps/`, and
    the next Da'Maps build picks it up.
 
-A map that keeps a Genie map's file name (e.g. `Map1_Crossing.xml`) replaces
-that map in Da'Maps. A new file name adds a new map. **Doorway to** on a room
-links it to another map by that map's file name.
+Name the `.damap` files however you like. Inside each map, the **Link name**
+(e.g. `Map1_Crossing.xml`) is how Da'Maps and other maps' doorways know it, so
+leave it as it is on an existing map; a new map gets its own. **Doorway to** on
+a room links it to another map by that map's link name.
 
 ## Building it
 

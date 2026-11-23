@@ -68,8 +68,12 @@ export interface DaMapFile {
   /** short map id, e.g. "1" (the Genie zone id when the map came from one) */
   id:      string
   name:    string
-  /** the map's file name ("Map1_Crossing.xml"); doorways in other maps point at it */
+  /** the map's link name ("Map1_Crossing.xml"); doorways in other maps point at it.
+   *  This, not the .damap file's own name, is what identifies the map. */
   file:    string
+  /** other link names this map answers to: the Genie side maps folded into it
+   *  (the Crossing holds the Jadewater, the temple, the market plaza…) */
+  includes?: string[]
   rooms:   DaMapRoom[]
   labels:  DaMapLabel[]
 }
@@ -126,6 +130,10 @@ export function parseDamap(text: string): DaMapFile {
     }),
   }
   if (!out.file.toLowerCase().endsWith('.xml')) out.file += '.xml'
+  if (Array.isArray(o.includes)) {
+    const inc = o.includes.filter((x): x is string => typeof x === 'string' && !!x.trim()).map(x => x.trim())
+    if (inc.length) out.includes = inc
+  }
   return out
 }
 
@@ -166,7 +174,7 @@ export function stringifyDamap(m: DaMapFile): string {
   }
   // One room (and one place name) per line: small files, and a change to a room
   // shows up as a one-line diff.
-  const head = JSON.stringify({ format: clean.format, version: clean.version, id: clean.id, name: clean.name, file: clean.file }, null, 1).slice(0, -2)
+  const head = JSON.stringify({ format: clean.format, version: clean.version, id: clean.id, name: clean.name, file: clean.file, ...(m.includes?.length ? { includes: m.includes } : {}) }, null, 1).slice(0, -2)
   const list = (xs: unknown[]) => xs.length ? '[\n' + xs.map(x => '  ' + JSON.stringify(x)).join(',\n') + '\n ]' : '[]'
   return `${head},\n "rooms": ${list(clean.rooms)},\n "labels": ${list(clean.labels)}\n}\n`
 }
