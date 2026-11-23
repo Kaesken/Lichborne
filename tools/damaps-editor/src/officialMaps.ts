@@ -43,7 +43,6 @@ export interface Plan {
 }
 export type Record_ = Record<string, string>   // link name (lower case) → official sha last downloaded
 
-const UA = { 'User-Agent': 'DaMaps-Editor', Accept: 'application/vnd.github+json' }
 
 function readLocal(folder: string): Map<string, Local & { name: string }> {
   const out = new Map<string, Local & { name: string }>()
@@ -64,24 +63,19 @@ function readLocal(folder: string): Map<string, Local & { name: string }> {
 /** Work out what an update would do. Downloads only the maps that differ. */
 export async function planUpdate(folder: string, record: Record_, fetchFn: Fetch, src: Source = OFFICIAL):
   Promise<{ plan: Plan; texts: Map<string, string> } | { error: string }> {
-  // The list of maps: index.json, which the Da'Maps build writes beside them.
-  // It comes from GitHub's file server, which (unlike GitHub's API) doesn't
-  // limit how often someone without a login may ask. The API is the fallback.
+  // The list of maps: index.json, which the Da'Maps build writes beside them,
+  // fetched from GitHub's file server (no limit for people without a login,
+  // unlike GitHub's API).
   const raw = `https://raw.githubusercontent.com/${src.repo}/${src.ref}/${src.dir}`
-  let remote: { name: string; sha: string; download_url: string }[]
   const idx = await fetchFn(`${raw}/index.json`, { headers: { 'User-Agent': 'DaMaps-Editor' } })
-  if (idx.ok) {
-    const j = JSON.parse(await idx.text()) as { maps?: { name: string; sha: string }[] }
-    remote = (j.maps ?? []).filter(e => e.name.toLowerCase().endsWith('.damap'))
-      .map(e => ({ ...e, download_url: `${raw}/${e.name.split('/').map(encodeURIComponent).join('/')}` }))
-  } else {
-    const list = await fetchFn(`https://api.github.com/repos/${src.repo}/contents/${src.dir}?ref=${encodeURIComponent(src.ref)}`, { headers: UA })
-    if (list.status === 404) return { error: 'There are no official maps on Lichborne\'s GitHub yet. They arrive when the Da\'Maps maps are added to Lichborne.' }
-    if (list.status === 403 || list.status === 429) return { error: 'GitHub is limiting how often it can be asked right now. Try again in an hour.' }
-    if (!list.ok) return { error: `GitHub answered ${list.status}. Try again later.` }
-    const entries = (await list.json()) as { name: string; sha: string; download_url: string; type: string }[]
-    remote = entries.filter(e => e.type === 'file' && e.name.toLowerCase().endsWith('.damap'))
-  }
+  if (idx.status === 404) return { error: 'There are no official maps on Lichborne\'s GitHub yet. They arrive when the Da\'Maps maps are added to Lichborne.' }
+  if (idx.status === 429 || idx.status === 403) return { error: 'GitHub is busy right now. Try again in a little while.' }
+  if (!idx.ok) return { error: `GitHub answered ${idx.status}. Try again later.` }
+  let listed: { name: string; sha: string }[]
+  try { listed = (JSON.parse(await idx.text()) as { maps?: { name: string; sha: string }[] }).maps ?? [] }
+  catch { return { error: 'The list of official maps on GitHub couldn\'t be read. Try again later.' } }
+  const remote = listed.filter(e => typeof e.name === 'string' && e.name.toLowerCase().endsWith('.damap') && !/[\\/]/.test(e.name))
+    .map(e => ({ ...e, download_url: `${raw}/${encodeURIComponent(e.name)}` }))
   const local = readLocal(folder)
   const plan: Plan = { added: [], updated: [], changedByYou: [], same: 0 }
   const texts = new Map<string, string>()

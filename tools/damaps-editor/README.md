@@ -28,11 +28,30 @@ Name the `.damap` files however you like. Inside each map, the **Link name**
 leave it as it is on an existing map; a new map gets its own. **Doorway to** on
 a room links it to another map by that map's link name.
 
+## Getting the latest maps
+
+**⇩ Latest maps** (or File → Get latest maps…) downloads the official maps from
+Lichborne's GitHub (`tools/damaps/maps/` on `main`) into the map folder. Maps
+are matched by link name, so renamed files are fine. A map changed since it was
+last downloaded is only replaced if you say so. The list of maps is
+`index.json`, which the Da'Maps build writes; it is read from GitHub's file
+server, which doesn't limit people without a GitHub login.
+
+## Sharing it
+
+`--pack --installer` makes `DaMaps-Editor-Setup-<version>.exe` from
+[installer.nsi](installer.nsi) (our own NSIS script: electron-builder's NSIS
+target needs Wine when built off Windows, makensis doesn't). It installs for the
+current user, adds Start menu and optional desktop shortcuts and an uninstaller,
+and the installed editor keeps maps in `Documents\DaMaps`. It isn't code
+signed, so Windows warns on first run.
+
 ## Building it
 
 ```
 node tools/damaps-editor/build.mjs               # build into tools/damaps-editor/dist
 npx electron tools/damaps-editor/dist            # run it
+node tools/damaps-editor/build.mjs --pack --installer  # an installer to share (release/DaMaps-Editor-Setup-<version>.exe)
 node tools/damaps-editor/build.mjs --pack --dir  # the program folder (release/win-unpacked); starts fast
 node tools/damaps-editor/build.mjs --pack        # one portable .exe (starts slowly: it unpacks itself each time)
 node tools/damaps-editor/build.mjs --pack --zip  # or a zip of the program folder
