@@ -1,8 +1,9 @@
 # DaMaps Editor
 
 A small Windows program for making and changing Da'Maps maps: rooms, the lines
-between them, and place names. It saves `.damap` files, which the Da'Maps build
-reads from [`tools/damaps/maps/`](../damaps/maps/).
+between them, and place names. It saves `.damap` files. The official maps live
+in the Da'Maps repository, [github.com/Kaesken/Da-Maps](https://github.com/Kaesken/Da-Maps)
+(`maps/`), which Lichborne downloads.
 
 ## Using it
 
@@ -20,8 +21,9 @@ reads from [`tools/damaps/maps/`](../damaps/maps/).
 4. Give every room its title and description exactly as the game shows them.
    That's how Da'Maps finds where you are.
 5. **Save**. Maps go to the **My Maps** folder beside the program unless you pick somewhere else.
-6. Send the `.damap` file to be added. It goes into `tools/damaps/maps/`, and
-   the next Da'Maps build picks it up.
+6. Put the `.damap` file in the Da'Maps repository's `maps/` folder and push.
+   Players get it the next time they click **⇩ Update** in Da'Maps; no new
+   Lichborne is needed.
 
 Name the `.damap` files however you like. Inside each map, the **Link name**
 (e.g. `Map1_Crossing.xml`) is how Da'Maps and other maps' doorways know it, so
@@ -31,11 +33,11 @@ a room links it to another map by that map's link name.
 ## Getting the latest maps
 
 **⇩ Latest maps** (or File → Get latest maps…) downloads the official maps from
-Lichborne's GitHub (`tools/damaps/maps/` on `main`) into the map folder. Maps
-are matched by link name, so renamed files are fine. A map changed since it was
-last downloaded is only replaced if you say so. The list of maps is
-`index.json`, which the Da'Maps build writes; it is read from GitHub's file
-server, which doesn't limit people without a GitHub login.
+the Da'Maps repository (`maps/` on `main`) into the map folder. Maps are matched
+by link name, so renamed files are fine. A map changed since it was last
+downloaded is only replaced if you say so. The list of maps is `maps/index.json`,
+which the repository's workflow rewrites on every push; it is read from GitHub's
+file server, which doesn't limit people without a GitHub login.
 
 ## Sharing it
 
@@ -58,5 +60,5 @@ node tools/damaps-editor/build.mjs --pack --zip  # or a zip of the program folde
 ```
 
 The file format and its checks are in
-[`tools/damaps/damapFormat.ts`](../damaps/damapFormat.ts), shared with the
+[`damaps/build/damapFormat.ts`](../../src/renderer/components/panels/damaps/build/damapFormat.ts), shared with the
 Da'Maps build, so the editor saves exactly what the build reads.

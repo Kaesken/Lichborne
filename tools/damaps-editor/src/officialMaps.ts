@@ -1,5 +1,5 @@
 // DaMaps Editor — "Get latest maps": bring a map folder up to date with the
-// official maps on Lichborne's GitHub (tools/damaps/maps/ on main).
+// official maps in the Da'Maps repository on GitHub (Kaesken/Da-Maps, maps/ on main).
 //
 // Maps are matched by their link name (`file` inside the map), never by file
 // name, because people rename their .damap files. To tell "you changed this
@@ -20,9 +20,9 @@ import path from 'node:path'
 import crypto from 'node:crypto'
 import { parseDamap } from '../../damaps/damapFormat'
 
-export const OFFICIAL_REPO = 'elanthia-online/Lichborne'
+export const OFFICIAL_REPO = 'Kaesken/Da-Maps'
 export const OFFICIAL_REF = 'main'
-export const OFFICIAL_DIR = 'tools/damaps/maps'
+export const OFFICIAL_DIR = 'maps'
 
 type Fetch = (url: string, init?: { headers?: Record<string, string> }) => Promise<{ ok: boolean; status: number; json(): Promise<unknown>; text(): Promise<string> }>
 
@@ -63,7 +63,7 @@ function readLocal(folder: string): Map<string, Local & { name: string }> {
 /** Work out what an update would do. Downloads only the maps that differ. */
 export async function planUpdate(folder: string, record: Record_, fetchFn: Fetch, src: Source = OFFICIAL):
   Promise<{ plan: Plan; texts: Map<string, string> } | { error: string }> {
-  // The list of maps: index.json, which the Da'Maps build writes beside them,
+  // The list of maps: index.json, which the Da'Maps repository's workflow writes beside them,
   // fetched from GitHub's file server (no limit for people without a login,
   // unlike GitHub's API).
   const raw = `https://raw.githubusercontent.com/${src.repo}/${src.ref}/${src.dir}`

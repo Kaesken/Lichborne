@@ -2,20 +2,22 @@
 // damaps-mana.lic Lich script's tour mode, so a tour covers exactly what
 // Da'Maps shows.
 //
-//   node tools/damaps/build-tour-list.mjs [out file]
+//   node tools/damaps/build-tour-list.mjs <built map .json> [out file]
 //
-// Reads src/renderer/public/damaps-world.json and writes damaps-maps.txt
-// (default: tools/damaps/damaps-maps.txt). One line per map, all floors
+// Reads a built Da'Maps map (made by
+//   node tools/damaps/build-damaps.mjs <Da-Maps/maps> <Lich map json> <out.json>)
+// and writes damaps-maps.txt (default: tools/damaps/damaps-maps.txt). One line per map, all floors
 // together, tab-separated:  <map name> <Lich IDs, comma-separated>
 // Put the file in Lich's scripts/custom folder, next to damaps-mana.lic.
-// Re-run whenever damaps-world.json is rebuilt.
+// Re-run whenever the maps change.
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
-const world = JSON.parse(fs.readFileSync(path.join(here, '../../src/renderer/public/damaps-world.json'), 'utf8'))
-const out = process.argv[2] ?? path.join(here, 'damaps-maps.txt')
+if (!process.argv[2]) { console.error('usage: node tools/damaps/build-tour-list.mjs <built map .json> [out file]'); process.exit(1) }
+const world = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'))
+const out = process.argv[3] ?? path.join(here, 'damaps-maps.txt')
 const maps = new Map()   // ground-floor key -> { name, ids }
 for (const a of world.areas) {
   const ground = a.floors[0]
