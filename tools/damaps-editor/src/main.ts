@@ -7,6 +7,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { decodeMapFile } from '../../damaps/readGenieXml'
 import { planUpdate, applyUpdate, type Record_ } from './officialMaps'
+import { parseDamap } from '../../damaps/damapFormat'
 
 let win: BrowserWindow | null = null
 let dirty = false
@@ -137,6 +138,19 @@ async function getLatestMaps() {
 }
 ipcMain.on('get-latest', () => { getLatestMaps() })
 
+/** Every map in the map folder: its link names and its name, for "Doorway to". */
+ipcMain.handle('map-index', () => {
+  const folder = mapsFolder()
+  const out: { path: string; name: string; links: string[] }[] = []
+  for (const f of fs.readdirSync(folder)) {
+    if (!f.toLowerCase().endsWith('.damap')) continue
+    try {
+      const m = parseDamap(fs.readFileSync(path.join(folder, f), 'utf8'))
+      out.push({ path: path.join(folder, f), name: m.name || f.replace(/\.damap$/i, ''), links: [m.file, ...(m.includes ?? [])] })
+    } catch { /* not a readable map */ }
+  }
+  return out
+})
 ipcMain.handle('open', async () => {
   const r = await dialog.showOpenDialog(win!, { title: 'Open a map', defaultPath: mapsFolder(), filters: [{ name: 'Da\'Maps map', extensions: ['damap'] }], properties: ['openFile'] })
   if (r.canceled || !r.filePaths[0]) return null

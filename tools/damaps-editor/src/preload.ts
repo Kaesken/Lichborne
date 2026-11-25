@@ -14,4 +14,5 @@ contextBridge.exposeInMainWorld('api', {
   onStatus: (fn: (text: string) => void) => ipcRenderer.on('status', (_e, t: string) => fn(t)),
   onMapsUpdated: (fn: (paths: string[]) => void) => ipcRenderer.on('maps-updated', (_e, p: string[]) => fn(p)),
   reopen: (path: string) => ipcRenderer.invoke('reopen', path),
+  mapIndex: () => ipcRenderer.invoke('map-index'),
 })

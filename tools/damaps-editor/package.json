@@ -1,7 +1,7 @@
 {
  "name": "damaps-editor",
  "productName": "DaMaps Editor",
- "version": "1.1.0",
+ "version": "1.1.1",
  "description": "Make and edit maps for Lichborne's Da'Maps",
  "author": "Kaesken",
  "private": true

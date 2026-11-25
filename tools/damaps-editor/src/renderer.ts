@@ -28,7 +28,9 @@ interface Api {
   onStatus(fn: (text: string) => void): void
   onMapsUpdated(fn: (paths: string[]) => void): void
   reopen(path: string): Promise<string | null>
+  mapIndex(): Promise<MapEntry[]>
 }
+interface MapEntry { path: string; name: string; links: string[] }
 const api = (window as unknown as { api: Api }).api
 
 // Room colours the map community uses (same list as Lichborne's map legend).
@@ -57,6 +59,13 @@ let past: string[] = []
 let future: string[] = []
 const view = { tx: 0, ty: 0, s: 3 }
 let byId = new Map<number, DaMapRoom>()
+// The maps in the map folder, for "Doorway to": shown by name, stored by link name.
+let mapIndex: MapEntry[] = []
+const mapForLink = (link: string) => mapIndex.find(m => m.links.some(l => l.toLowerCase() === link.toLowerCase()))
+const doorwayName = (link: string) => mapForLink(link)?.name ?? link
+async function refreshMapIndex() {
+  try { mapIndex = (await api.mapIndex()).sort((a, b) => a.name.localeCompare(b.name)) } catch { mapIndex = [] }
+}
 
 const $ = <T extends Element = HTMLElement>(sel: string) => document.querySelector(sel) as unknown as T
 const svg = $<SVGSVGElement>('#canvas')
@@ -163,7 +172,7 @@ function render() {
     const fill = r.color ? ` style="fill:${r.color}"` : ''
     const up = r.exits.some(e => e.exit === 'up' || (byId.get(e.to)?.z ?? floor) > floor)
     const down = r.exits.some(e => e.exit === 'down' || (byId.get(e.to)?.z ?? floor) < floor)
-    const tip = `#${r.id} ${r.title || '(no title)'}${r.linksTo ? `\nDoorway to ${r.linksTo}` : ''}`
+    const tip = `#${r.id} ${r.title || '(no title)'}${r.linksTo ? `\nDoorway to ${doorwayName(r.linksTo)}` : ''}`
     rooms += `<g class="rm${sel ? ' sel' : ''}${r.linksTo ? ' door' : ''}" data-room="${r.id}"><title>${esc(tip)}</title>`
       + `<rect x="${r.x - HALF}" y="${r.y - HALF}" width="8" height="8" rx="1"${fill}/>`
       + (up ? `<path class="updown" d="M${r.x - 1.6} ${r.y - 0.4}l1.6 -2.8l1.6 2.8z"/>` : '')
@@ -287,6 +296,29 @@ function colorPicker(current: string | undefined, set: (c: string | undefined) =
   return box
 }
 
+/** "Doorway to": the maps in your folder by name; the map's link name is what's saved. */
+function doorwayPicker(r: DaMapRoom) {
+  const sel = h('select') as HTMLSelectElement
+  const cur = r.linksTo ?? ''
+  const own = new Set([map.file, ...(map.includes ?? [])].map(l => l.toLowerCase()))
+  const opts = mapIndex.filter(m => !m.links.some(l => own.has(l.toLowerCase())))
+  const curMap = cur ? mapForLink(cur) : undefined
+  sel.append(new Option('(not a doorway)', ''))
+  for (const m of opts) sel.append(new Option(m.name, m.links[0]))
+  // a link name the folder doesn't have: keep it, say so
+  if (cur && !curMap) sel.append(new Option(`${cur} (not in your map folder)`, cur))
+  sel.value = curMap ? (opts.includes(curMap) ? curMap.links[0] : cur) : cur
+  if (curMap && !opts.includes(curMap)) { sel.append(new Option(curMap.name, cur)); sel.value = cur }
+  sel.title = sel.selectedOptions[0]?.text ?? ''
+  sel.onchange = () => change(() => { if (sel.value) r.linksTo = sel.value; else delete r.linksTo })
+  const go = h('button', { class: 'small', title: curMap ? `Open ${curMap.name}` : 'That map isn\'t in your map folder' }, 'Open')
+  ;(go as HTMLButtonElement).disabled = !curMap
+  go.onclick = () => { if (curMap) openPath(curMap.path) }
+  const box = h('div', { class: 'row', style: 'margin-top:0;flex-wrap:nowrap' }, sel, go)
+  sel.style.flex = '1'; sel.style.minWidth = '0'
+  return box
+}
+
 function renderManyProps(rooms: DaMapRoom[]) {
   props.append(h('h2', {}, `${rooms.length} rooms selected`))
   props.append(h('p', { class: 'hint' }, 'Drag any of them to move them all. Arrow keys nudge them.'))
@@ -320,7 +352,7 @@ function renderRoomProps(r: DaMapRoom) {
   props.append(field('Floor', numBox(r.z, v => { r.z = v! }), '0 is the ground floor, 1 upstairs, -1 below'))
   props.append(h('h2', {}, 'Extra'))
   props.append(field('Other names', textBox((r.aliases ?? []).join('\n'), v => { const a = v.split('\n').map(s => s.trim()).filter(Boolean); if (a.length) r.aliases = a; else delete r.aliases }, { area: true, rows: 2, placeholder: 'One per line (optional)' }), 'Other names people search this room by, e.g. a shop\'s name'))
-  props.append(field('Doorway to', textBox(r.linksTo ?? '', v => { const t = v.trim(); if (t) r.linksTo = t; else delete r.linksTo }, { placeholder: 'another map\'s file name' }), 'Makes this square a doorway onto another map, e.g. Map7_NTR.xml'))
+  props.append(field('Doorway to', doorwayPicker(r), 'Makes this square a doorway onto another map'))
   props.append(field('Lich room #', numBox(r.lich, v => { if (v) r.lich = v; else delete r.lich }, { blankOk: true }), 'Only if Da\'Maps matches this room to the wrong Lich room. Leave blank otherwise.'))
 
   props.append(h('h2', {}, `Exits (${r.exits.length})`))
@@ -619,8 +651,15 @@ async function openMap() {
   if (!(await okToDiscard())) return
   const f = await api.open()
   if (!f) return
+  await refreshMapIndex()
   try { load(parseDamap(f.text), f.path) }
   catch (err) { alert(`Couldn't open that map:\n\n${(err as Error).message}`) }
+}
+async function openPath(p: string) {
+  if (!(await okToDiscard())) return
+  const text = await api.reopen(p)
+  if (text == null) { alert('That map couldn\'t be opened.'); return }
+  try { load(parseDamap(text), p) } catch (err) { alert(`Couldn't open that map:\n\n${(err as Error).message}`) }
 }
 async function importGenie() {
   if (!(await okToDiscard())) return
@@ -641,6 +680,7 @@ async function save(saveAs: boolean): Promise<boolean> {
     if (!p) return false
     filePath = p
     markDirty(false)
+    await refreshMapIndex()
     const probs = checkDamap(map)
     status.textContent = probs.length ? `Saved. Worth a look: ${probs.join('; ')}` : `Saved ${p}`
     renderProps()
@@ -680,6 +720,7 @@ api.onStatus(t => { if (t) status.textContent = t; else updateStatus() })
 // The open map was among those just updated from GitHub: reload it, unless
 // there are unsaved changes (then say so and leave them alone).
 api.onMapsUpdated(async paths => {
+  await refreshMapIndex(); renderProps()
   if (!filePath || !paths.some(p => p.toLowerCase() === filePath!.toLowerCase())) return
   if (dirty) { alert('The map you have open was just updated from GitHub. Your unsaved changes are still here; saving will replace the update with your version.'); return }
   const text = await api.reopen(filePath)
@@ -688,6 +729,7 @@ api.onMapsUpdated(async paths => {
 new ResizeObserver(() => updateStatus()).observe(svg)
 
 setTool('select')
+refreshMapIndex().then(() => { render(); renderProps() })
 load(emptyDamap(), null)
 setTool('room')
 $('#help').hidden = false
