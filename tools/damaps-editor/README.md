@@ -70,9 +70,26 @@ file server, which doesn't limit people without a GitHub login.
 `--pack --installer` makes `DaMaps-Editor-Setup-<version>.exe` from
 [installer.nsi](installer.nsi) (our own NSIS script: electron-builder's NSIS
 target needs Wine when built off Windows, makensis doesn't). It installs for the
-current user, adds Start menu and optional desktop shortcuts and an uninstaller,
-and the installed editor keeps maps in `Documents\DaMaps`. It isn't code
-signed, so Windows warns on first run.
+current user, adds Start menu and optional desktop shortcuts, an uninstaller (in
+Settings → Apps and on the Start menu), and the installed editor keeps maps in
+`Documents\DaMaps`. It isn't code signed, so Windows warns on first run.
+
+## Updates
+
+New versions are releases on the Da-Maps repository
+(github.com/Kaesken/Da-Maps/releases), tagged `editor-v<version>` with
+`DaMaps-Editor-Setup-<version>.exe` attached ([editorUpdate.ts](src/editorUpdate.ts)).
+To publish one: raise `version` in [package.json](package.json), build the
+installer, and make a release with that tag and that file. Lichborne doesn't
+read releases, so this never affects players.
+
+The editor checks once a few seconds after it opens (it says nothing unless
+there's a newer version) and from Help → Check for updates. **Update now**
+downloads the installer, checks its size and SHA-256 against GitHub, closes the
+editor (asking about unsaved changes as usual) and runs the installer silently
+over the editor's own folder (`/S /UPDATE /D=<folder>`). The installer waits for
+the editor to close, then reopens it. Run from source or as the old portable
+exe, it only offers the download page.
 
 ## Building it
 

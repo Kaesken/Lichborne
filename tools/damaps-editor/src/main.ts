@@ -8,6 +8,10 @@ import path from 'node:path'
 import { decodeMapFile } from '../../damaps/readGenieXml'
 import { planUpdate, applyUpdate, type Record_ } from './officialMaps'
 import { parseDamap } from '../../damaps/damapFormat'
+import { findNewestRelease, compareVersions, RELEASES_PAGE, type EditorRelease } from './editorUpdate'
+import { spawn } from 'node:child_process'
+import crypto from 'node:crypto'
+import os from 'node:os'
 
 let win: BrowserWindow | null = null
 let dirty = false
@@ -63,7 +67,12 @@ function menu() {
       { role: 'togglefullscreen' },
       { role: 'toggleDevTools' },
     ] },
-    { label: 'Help', submenu: [ { label: 'How to use the editor', click: () => send('help') } ] },
+    { label: 'Help', submenu: [
+      { label: 'How to use the editor', click: () => send('help') },
+      { type: 'separator' },
+      { label: 'Check for updates…', click: () => checkForUpdate(true) },
+      { label: `About DaMaps Editor ${app.getVersion()}`, click: () => dialog.showMessageBox(win!, { type: 'info', message: `DaMaps Editor ${app.getVersion()}`, detail: `Makes and changes maps for Lichborne's Da'Maps.\n\nNew versions: ${RELEASES_PAGE}` }) },
+    ] },
   ]
   Menu.setApplicationMenu(Menu.buildFromTemplate(tpl))
 }
@@ -205,5 +214,89 @@ ipcMain.on('close-now', () => { closing = true; win?.close() })
 ipcMain.handle('confirm', (_e, msg: string, detail: string) =>
   dialog.showMessageBoxSync(win!, { type: 'question', buttons: ['Save', "Don't save", 'Cancel'], defaultId: 0, cancelId: 2, message: msg, detail }))
 
-app.whenReady().then(() => { menu(); createWindow() })
+// ── Updates ──────────────────────────────────────────────────────────────
+// Checks the Da-Maps repository's releases (editorUpdate.ts) once at start,
+// quietly, and from Help → Check for updates. Accepting downloads the
+// installer, checks its size and SHA-256 against what GitHub reports, then
+// closes the editor (asking about unsaved changes as usual) and runs the
+// installer silently over this copy's own folder, which reopens it.
+// Run from source or as the old portable exe, it only offers the download page.
+let updateBusy = false
+let pendingInstaller: string | null = null
+
+function canSelfInstall(): boolean {
+  return app.isPackaged && process.platform === 'win32' && !process.env.PORTABLE_EXECUTABLE_DIR
+}
+
+async function checkForUpdate(manual: boolean) {
+  if (!win || updateBusy) return
+  updateBusy = true
+  try {
+    if (manual) win.webContents.send('status', 'Checking GitHub for a newer DaMaps Editor…')
+    const rel = await findNewestRelease((url, init) => net.fetch(url, init) as never)
+    if (!rel || compareVersions(rel.version, app.getVersion()) <= 0) {
+      if (manual) dialog.showMessageBox(win, { type: 'info', message: 'DaMaps Editor is up to date.', detail: `You have version ${app.getVersion()}, the newest there is.` })
+      return
+    }
+    const notes = rel.notes ? `\n\nWhat's new:\n${rel.notes.length > 900 ? rel.notes.slice(0, 900) + '…' : rel.notes}` : ''
+    if (!canSelfInstall()) {
+      const c = (await dialog.showMessageBox(win, { type: 'info', buttons: ['Open download page', 'Later'], defaultId: 0, cancelId: 1,
+        message: `DaMaps Editor ${rel.version} is available.`, detail: `You have version ${app.getVersion()}.${notes}` })).response
+      if (c === 0) shell.openExternal(rel.page)
+      return
+    }
+    const c = (await dialog.showMessageBox(win, { type: 'info', buttons: ['Update now', 'Later'], defaultId: 0, cancelId: 1,
+      message: `DaMaps Editor ${rel.version} is available.`,
+      detail: `You have version ${app.getVersion()}. Updating downloads it (${Math.round(rel.asset.size / 1e6)} MB), closes the editor and opens the new version. Your maps aren't touched.${notes}` })).response
+    if (c !== 0) return
+    const file = await downloadInstaller(rel)
+    pendingInstaller = file
+    win?.webContents.send('status', `DaMaps Editor ${rel.version} is ready. It installs when the editor closes.`)
+    win?.close()
+  } catch (e) {
+    if (manual) dialog.showMessageBox(win!, { type: 'error', message: 'Couldn\'t check for updates', detail: `${(e as Error).message}\n\nCheck your internet connection and try again, or get it from ${RELEASES_PAGE}` })
+    else console.warn('update check failed:', e)
+  } finally {
+    updateBusy = false
+    win?.setProgressBar(-1)
+    if (!pendingInstaller) win?.webContents.send('status', '')
+  }
+}
+
+async function downloadInstaller(rel: EditorRelease): Promise<string> {
+  const dir = path.join(os.tmpdir(), 'DaMaps Editor update')
+  fs.mkdirSync(dir, { recursive: true })
+  const file = path.join(dir, rel.asset.name)
+  const res = await net.fetch(rel.asset.url, { headers: { 'User-Agent': 'DaMaps-Editor' } })
+  if (!res.ok || !res.body) throw new Error(`The download failed (GitHub answered ${res.status}).`)
+  const hash = crypto.createHash('sha256')
+  const out = fs.createWriteStream(file)
+  let got = 0, shown = -1
+  try {
+    for await (const chunk of res.body as unknown as AsyncIterable<Uint8Array>) {
+      got += chunk.length
+      if (got > rel.asset.size) throw new Error('The download is bigger than GitHub says it should be.')
+      hash.update(chunk)
+      if (!out.write(chunk)) await new Promise<void>(ok => out.once('drain', () => ok()))
+      const pct = Math.floor(got * 100 / rel.asset.size)
+      if (pct !== shown) { shown = pct; win?.setProgressBar(got / rel.asset.size); win?.webContents.send('status', `Downloading DaMaps Editor ${rel.version}… ${pct}%`) }
+    }
+  } finally {
+    await new Promise<void>(ok => out.end(() => ok()))
+  }
+  if (got !== rel.asset.size) { fs.rmSync(file, { force: true }); throw new Error('The download was cut short.') }
+  if (rel.asset.sha256 && hash.digest('hex') !== rel.asset.sha256) { fs.rmSync(file, { force: true }); throw new Error('The download didn\'t match the one on GitHub, so it wasn\'t installed.') }
+  return file
+}
+
+app.whenReady().then(() => { menu(); createWindow(); setTimeout(() => checkForUpdate(false), 4000) })
 app.on('window-all-closed', () => app.quit())
+// the installer waits for this process to end before replacing the files
+app.on('quit', () => {
+  if (!pendingInstaller) return
+  const dir = path.dirname(process.execPath)
+  // Verbatim, because NSIS wants /D= last and unquoted even with spaces; that
+  // also stops Node quoting the program's own name, so quote it here (argv0),
+  // or a temp folder with a space in it would be read as arguments.
+  spawn(pendingInstaller, ['/S', '/UPDATE', `/D=${dir}`], { argv0: `"${pendingInstaller}"`, detached: true, stdio: 'ignore', windowsVerbatimArguments: true }).unref()
+})

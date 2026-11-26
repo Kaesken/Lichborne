@@ -10,9 +10,14 @@
 ; Documents\DaMaps by the editor itself, never in the program folder, so
 ; updating or uninstalling never touches them. The uninstaller removes only
 ; the files it installed (FILES), so a folder chosen by mistake isn't emptied.
+;
+; The editor's own updater runs this silently: `/S /UPDATE /D=<its folder>`.
+; /UPDATE waits for the editor to close (its exe can't be replaced while it
+; runs), then opens it again once installed.
 
 Unicode true
 !include "MUI2.nsh"
+!include "FileFunc.nsh"
 
 !define APP "DaMaps Editor"
 !define REGKEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\DaMapsEditor"
@@ -48,18 +53,53 @@ VIAddVersionKey "LegalCopyright" "Lichborne contributors"
 !insertmacro MUI_UNPAGE_INSTFILES
 !insertmacro MUI_LANGUAGE "English"
 
+Var Update
+
+Function .onInit
+  ${GetParameters} $0
+  ClearErrors
+  ${GetOptions} $0 "/UPDATE" $1
+  IfErrors +2
+  StrCpy $Update 1
+FunctionEnd
+
+; wait (up to 30 s) until the editor has closed and its exe can be replaced
+Function WaitForEditor
+  StrCpy $2 0
+  loop:
+    IfFileExists "$INSTDIR\DaMaps Editor.exe" 0 done
+    ClearErrors
+    FileOpen $3 "$INSTDIR\DaMaps Editor.exe" a
+    IfErrors 0 opened
+    IntOp $2 $2 + 1
+    IntCmp $2 60 done
+    Sleep 500
+    Goto loop
+  opened:
+    FileClose $3
+  done:
+FunctionEnd
+
+Function .onInstSuccess
+  StrCmp $Update 1 0 +2
+  Exec '"$INSTDIR\DaMaps Editor.exe"'
+FunctionEnd
+
 Function DesktopShortcut
   CreateShortCut "$DESKTOP\${APP}.lnk" "$INSTDIR\DaMaps Editor.exe"
 FunctionEnd
 
 Section "Install"
   SetOutPath "$INSTDIR"
+  StrCmp $Update 1 0 +2
+  Call WaitForEditor
   ; an update: clear out the old program's folders first (only ours)
   RMDir /r "$INSTDIR\locales"
   RMDir /r "$INSTDIR\resources"
   File /r "${SRC}\*.*"
   WriteUninstaller "$INSTDIR\Uninstall DaMaps Editor.exe"
   CreateShortCut "$SMPROGRAMS\${APP}.lnk" "$INSTDIR\DaMaps Editor.exe"
+  CreateShortCut "$SMPROGRAMS\Uninstall ${APP}.lnk" "$INSTDIR\Uninstall DaMaps Editor.exe"
   WriteRegStr HKCU "Software\DaMaps Editor" "InstallDir" "$INSTDIR"
   WriteRegStr HKCU "${REGKEY}" "DisplayName" "${APP}"
   WriteRegStr HKCU "${REGKEY}" "DisplayVersion" "${VERSION}"
@@ -74,6 +114,7 @@ SectionEnd
 
 Section "Uninstall"
   Delete "$SMPROGRAMS\${APP}.lnk"
+  Delete "$SMPROGRAMS\Uninstall ${APP}.lnk"
   Delete "$DESKTOP\${APP}.lnk"
   RMDir /r "$INSTDIR\locales"
   RMDir /r "$INSTDIR\resources"
