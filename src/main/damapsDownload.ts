@@ -242,6 +242,14 @@ export function readDaMapsArt(userData: string, file: string, fetchImpl: FetchLi
 }
 
 async function fetchArt(userData: string, file: string, fetchImpl: FetchLike): Promise<Buffer | null> {
+  // a mapper's own folder: the picture beside the maps (the editor's art folder), never fetched
+  const local = localDaMapsDir()
+  if (local) {
+    for (const dir of [path.join(local, 'art'), path.join(local, '..', 'art')]) {
+      try { return await fsp.readFile(path.join(dir, file)) } catch { /* try the next */ }
+    }
+    return null
+  }
   const status = readDaMapsStatus(userData)
   if (!status.installed) return null
   const cached = path.join(status.dir, 'art', file)

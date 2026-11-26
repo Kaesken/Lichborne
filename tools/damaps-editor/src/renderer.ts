@@ -224,7 +224,8 @@ async function drawArt() {
   ;($('#art-toggle') as HTMLButtonElement).classList.toggle('on', artOn)
   if (!artOn || !brushes || !floorHasArt(map, floor)) { setArt(null); return }
   const bb = floorBounds(map, floor)!
-  const scale = Math.min(2, 5000 / Math.max(bb.w, bb.h))
+  // sharp when zoomed in on a small map, still quick on a big one
+  const scale = Math.min(6, 4000 / Math.max(bb.w, bb.h))
   const img = await paintImage(floor, bb, scale, 'preview')
   if (seq !== artSeq || !img) return
   setArt(URL.createObjectURL(img), bb)
@@ -248,8 +249,10 @@ function toggleArt() {
 }
 
 /** How each floor's saved picture compares with the map now. */
-function pictureState(z: number): 'none' | 'ok' | 'old' | 'unused' {
+function pictureState(z: number): 'none' | 'ok' | 'old' | 'unused' | 'painted' {
   const a = map.art?.find(x => x.z === z)
+  // no stamp: painted some other way (by hand in Clip Studio), so the editor can't judge it
+  if (a && !a.stamp) return 'painted'
   if (!floorHasArt(map, z)) return a ? 'unused' : 'none'
   if (!a) return 'none'
   return a.stamp === artStamp(map, z) ? 'ok' : 'old'
@@ -265,7 +268,10 @@ async function makePictures() {
     if (!filePath) alert('Save the map first, so the pictures know where to go.')
     if (!(await save(false)) || !filePath) return
   }
-  const made: DaMapArt[] = []
+  const handPainted = (map.art ?? []).filter(a => !a.stamp && zs.includes(a.z))
+  if (handPainted.length && !confirm(`${handPainted.map(a => `${floorName(a.z)} (${a.file})`).join(', ')} ${handPainted.length === 1 ? 'has a picture' : 'have pictures'} painted outside the editor. Replace ${handPainted.length === 1 ? 'it' : 'them'} with the editor's?`)) return
+  // pictures of floors this doesn't paint, and that were painted elsewhere, stay
+  const made: DaMapArt[] = (map.art ?? []).filter(a => !a.stamp && !zs.includes(a.z))
   try {
     for (const z of zs) {
       status.textContent = `Painting ${floorName(z)}…`
@@ -281,7 +287,8 @@ async function makePictures() {
   } catch (err) { alert(`Couldn't make the picture:\n\n${(err as Error).message}`); updateStatus(); return }
   change(() => { map.art = made })
   await save(false)
-  status.textContent = `Made ${made.length} picture${made.length === 1 ? '' : 's'}: ${made.map(a => a.file).join(', ')} (in the art folder beside your maps)`
+  const n = made.filter(a => a.stamp).length
+  status.textContent = `Made ${n} picture${n === 1 ? '' : 's'}: ${made.filter(a => a.stamp).map(a => a.file).join(', ')} (in the art folder beside your maps)`
 }
 
 function floorName(z: number) { return z === 0 ? 'Ground floor' : z > 0 ? `Up ${z}` : `Down ${-z}` }
@@ -398,9 +405,10 @@ function renderMapProps() {
   if (!shown.length) props.append(h('p', { class: 'hint' }, 'No roads or buildings yet. Give links a surface (the “as” list in the toolbar, or select rooms) and mark rooms as buildings, then make the picture here.'))
   for (const z of shown) {
     const st = pictureState(z), name = zs.length > 1 ? `${floorName(z)}: ` : ''
-    const text = st === 'ok' ? `✓ ${name}picture up to date` : st === 'old' ? `⚠ ${name}picture is older than the map. Make it again.`
+    const text = st === 'painted' ? `✓ ${name}has a picture painted outside the editor (${map.art!.find(a => a.z === z)!.file})`
+      : st === 'ok' ? `✓ ${name}picture up to date` : st === 'old' ? `⚠ ${name}picture is older than the map. Make it again.`
       : st === 'unused' ? `⚠ ${name}has a picture but nothing to draw any more; making pictures removes it` : `${name}no picture yet`
-    props.append(h('p', { class: st === 'ok' ? 'ok' : st === 'none' ? 'hint' : 'warn' }, text))
+    props.append(h('p', { class: st === 'ok' || st === 'painted' ? 'ok' : st === 'none' ? 'hint' : 'warn' }, text))
   }
   const make = h('button', { class: 'primary' }, 'Make picture')
   make.title = 'Paint every floor with roads or buildings and save the pictures in the art folder beside your maps'
