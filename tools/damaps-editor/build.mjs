@@ -42,8 +42,8 @@ if (process.argv.includes('--pack')) {
 
 // The installer: our own NSIS script (installer.nsi) over the program folder.
 // electron-builder's NSIS target needs Wine off Windows; makensis doesn't.
-// makensis comes from electron-builder's cache (downloaded by any --pack), or
-// set MAKENSIS to one.
+// makensis comes from electron-builder's cache (when a build has downloaded it),
+// or set MAKENSIS to one (the Publish workflow uses Ubuntu's: /usr/bin/makensis).
 if (process.argv.includes('--installer')) {
   const { execFileSync } = await import('node:child_process')
   const os = await import('node:os')
@@ -64,13 +64,15 @@ if (process.argv.includes('--installer')) {
     throw new Error('makensis not found: run a --pack build once, or set MAKENSIS')
   }
   const makensis = find()
-  const nsisDir = path.dirname(process.platform === 'win32' ? makensis : path.dirname(makensis))
+  // electron-builder's copy needs NSISDIR pointed at its own folder; a system
+  // makensis (MAKENSIS, e.g. Ubuntu's `nsis` package) already knows its own.
+  const nsisDir = process.env.MAKENSIS ? undefined : path.dirname(process.platform === 'win32' ? makensis : path.dirname(makensis))
   // the uninstaller deletes exactly the top-level files it installed
   const files = path.join(here, 'release', 'installed-files.nsh')
   const top = fs.readdirSync(src).filter(f => fs.statSync(path.join(src, f)).isFile())
   fs.writeFileSync(files, top.map(f => `  Delete "$INSTDIR\\${f}"`).join('\n') + '\n')
   const out = path.join(here, 'release', `DaMaps-Editor-Setup-${pkg.version}.exe`)
   execFileSync(makensis, ['-V2', `-DSRC=${src}`, `-DOUT=${out}`, `-DVERSION=${pkg.version}`, `-DFILES=${files}`, path.join(here, 'installer.nsi')],
-    { stdio: 'inherit', env: { ...process.env, NSISDIR: nsisDir } })
+    { stdio: 'inherit', env: nsisDir ? { ...process.env, NSISDIR: nsisDir } : process.env })
   console.log('installer:', path.relative(process.cwd(), out))
 }
