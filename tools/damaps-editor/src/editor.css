@@ -83,3 +83,6 @@ main { flex: 1; display: flex; min-height: 0; }
 .help-card ul { margin: 0; padding-left: 18px; }
 .help-card li { margin-bottom: 4px; }
 .help-close { text-align: right; margin: 14px 0 0; }
+label.check { display: flex; align-items: center; gap: 6px; margin: 4px 0 6px; cursor: pointer; }
+label.check input { margin: 0; }
+#link-surface { margin-left: 2px; }

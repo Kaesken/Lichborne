@@ -18,6 +18,8 @@ await build({ ...common, entryPoints: [path.join(src, 'main.ts')], outfile: path
 await build({ ...common, entryPoints: [path.join(src, 'preload.ts')], outfile: path.join(dist, 'preload.js'), platform: 'node', format: 'cjs', external: ['electron'], target: 'node24' })
 await build({ ...common, entryPoints: [path.join(src, 'renderer.ts')], outfile: path.join(dist, 'renderer.js'), platform: 'browser', format: 'iife', target: 'chrome140' })
 for (const f of ['index.html', 'editor.css']) fs.copyFileSync(path.join(src, f), path.join(dist, f))
+// the picture brushes (Kaesken's Clip Studio pack), loaded by paint.ts
+fs.cpSync(path.join(here, 'brushes'), path.join(dist, 'brushes'), { recursive: true })
 const pkg = JSON.parse(fs.readFileSync(path.join(here, 'package.json'), 'utf8'))
 fs.writeFileSync(path.join(dist, 'package.json'), JSON.stringify({ name: pkg.name, productName: pkg.productName, version: pkg.version, description: pkg.description, author: pkg.author, main: 'main.js' }, null, 1))
 console.log('built', path.relative(process.cwd(), dist))

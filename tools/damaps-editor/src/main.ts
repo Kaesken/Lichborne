@@ -175,6 +175,30 @@ ipcMain.handle('save', async (_e, args: { path: string | null; text: string; sug
   fs.renameSync(tmp, p)
   return p
 })
+/**
+ * Where a map's pictures go: an `art` folder beside the maps. In the Da'Maps
+ * repository layout (maps in `maps/`) that is the repository's `art/`; anywhere
+ * else it is `art` inside the map's folder (My Maps\art).
+ */
+function artFolder(mapPath: string) {
+  const dir = path.dirname(mapPath)
+  return path.basename(dir).toLowerCase() === 'maps' ? path.join(dir, '..', 'art') : path.join(dir, 'art')
+}
+ipcMain.handle('save-art', (_e, args: { mapPath: string; file: string; png: ArrayBuffer }) => {
+  if (!/^[^\\/:*?"<>|]+\.(png|webp)$/i.test(args.file)) throw new Error(`not a picture file name: ${args.file}`)
+  const dir = artFolder(args.mapPath)
+  fs.mkdirSync(dir, { recursive: true })
+  const p = path.join(dir, args.file)
+  const tmp = p + '.tmp'
+  fs.writeFileSync(tmp, Buffer.from(args.png))
+  fs.renameSync(tmp, p)
+  return p
+})
+ipcMain.handle('show-art', (_e, mapPath: string) => {
+  const dir = artFolder(mapPath)
+  fs.mkdirSync(dir, { recursive: true })
+  return shell.openPath(dir)
+})
 ipcMain.on('dirty', (_e, d: boolean) => { dirty = d })
 ipcMain.on('title', (_e, t: string) => win?.setTitle(t))
 ipcMain.on('close-now', () => { closing = true; win?.close() })

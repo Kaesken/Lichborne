@@ -15,4 +15,6 @@ contextBridge.exposeInMainWorld('api', {
   onMapsUpdated: (fn: (paths: string[]) => void) => ipcRenderer.on('maps-updated', (_e, p: string[]) => fn(p)),
   reopen: (path: string) => ipcRenderer.invoke('reopen', path),
   mapIndex: () => ipcRenderer.invoke('map-index'),
+  saveArt: (mapPath: string, file: string, png: ArrayBuffer) => ipcRenderer.invoke('save-art', { mapPath, file, png }),
+  showArt: (mapPath: string) => ipcRenderer.invoke('show-art', mapPath),
 })

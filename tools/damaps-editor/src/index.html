@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' blob: data:; style-src 'self' 'unsafe-inline'; script-src 'self'">
 <title>DaMaps Editor</title>
 <link rel="stylesheet" href="editor.css">
 </head>
@@ -14,6 +14,9 @@
       <button data-tool="room" title="Add rooms (R). Click to place a room. Shift-click places one and links it to the selected room.">■ Room</button>
       <button data-tool="link" title="Link rooms (L). Drag from one room to another to add exits both ways. Hold Shift for a one-way exit.">╱ Link</button>
       <button data-tool="label" title="Add a place name (T). Click where the text should go.">A Label</button>
+      <label title="What new links are drawn as in the map's picture. Change one later in a room's exits, or select rooms and set the path between them.">as
+        <select id="link-surface"></select>
+      </label>
     </div>
     <div class="group">
       <label title="Floor shown. Rooms on other floors are hidden; up/down exits show as ▲ ▼.">Floor
@@ -26,6 +29,7 @@
         <select id="snap"><option value="0">Off</option><option value="5">5</option><option value="10" selected>10</option><option value="20">20</option></select>
       </label>
       <button id="fit" title="Fit the map to the window (F)">⤢ Fit</button>
+      <button id="art-toggle" title="Show the map's picture under the rooms (P): roads, paths, bridges and roofs, as players will see it">🖼 Picture</button>
     </div>
     <div class="spacer"></div>
     <div class="group">
@@ -43,6 +47,7 @@
         </defs>
         <g id="view">
           <rect id="grid-bg" x="-100000" y="-100000" width="200000" height="200000" fill="url(#grid)"/>
+          <g id="layer-art"></g>
           <g id="layer-lines"></g>
           <g id="layer-rooms"></g>
           <g id="layer-labels"></g>
@@ -69,6 +74,14 @@
     <ul>
       <li><b>⇩ Latest maps</b> (or File → Get latest maps…) downloads the official maps from Lichborne's GitHub into your map folder. A map you've changed is only replaced if you say so.</li>
       <li>File → Open… opens a map from your folder. File → Import Genie map… starts from a Genie map.</li>
+    </ul>
+    <h3>Pictures</h3>
+    <ul>
+      <li>A link can be drawn as a <b>Road</b>, <b>Dirt path</b>, <b>Bridge</b> or <b>River</b>. Pick it in the <b>as</b> list before drawing links, or set it later: select two rooms (or a whole street) and choose <b>Path between them</b>, or use the <b>Drawn as</b> column in a room's exits. Linked rooms with the same surface become one smooth curve.</li>
+      <li>Tick <b>Building</b> on a room to put a roof on it. Joined rooms with the same building name share <b>one roof</b> shaped to all of them. Select several rooms and click <b>Make them one building</b> to do it at once.</li>
+      <li><b>🖼 Picture</b> (P) shows the picture under the rooms while you work.</li>
+      <li>When it looks right, click <b>Make picture</b> in the map's panel (click empty space to see it). The picture is saved in an <b>art</b> folder beside your maps, and the map remembers it. Put the .damap in the Da'Maps repository's <b>maps</b> folder and the picture in its <b>art</b> folder.</li>
+      <li>If you move rooms or change paths afterwards, the panel says the picture is out of date. Make it again.</li>
     </ul>
     <h3>Moving around</h3>
     <ul>

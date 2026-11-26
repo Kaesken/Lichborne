@@ -5,6 +5,25 @@ between them, and place names. It saves `.damap` files. The official maps live
 in the Da'Maps repository, [github.com/Kaesken/Da-Maps](https://github.com/Kaesken/Da-Maps)
 (`maps/`), which Lichborne downloads.
 
+## Pictures (roads, bridges, roofs)
+
+The editor can paint a picture of each floor for Da'Maps to show under the
+rooms, using the Clip Studio brushes in `brushes/`:
+
+- **Surfaces.** A link can be a Road, Dirt path, Bridge (wood or stone) or
+  River. Pick one in the toolbar's **as** list before drawing links, or set it
+  afterwards: select rooms and choose **Path between them**, or pick it next to
+  each neighbour in a room's panel. Linked rooms with the same surface become
+  one smooth curve; where roads meet, the straightest pair carries on through.
+- **Buildings.** Tick **Building** on a room (or select several and click **Make
+  them one building**). Joined rooms with the same building name share one roof
+  shaped to all of them, with its ridge running room to room.
+- **🖼 Picture** (P) shows it under the rooms as you work.
+- **Make picture** (in the map's panel) saves a WebP per floor in an `art`
+  folder beside your maps (the repository's `art/` when the map is in `maps/`)
+  and records it in the map. The panel says when a picture is older than the
+  map. Push the .damap to `maps/` and the picture to `art/` together.
+
 ## Using it
 
 1. Open the **DaMaps Editor** shortcut. The program lives in a `Program` folder

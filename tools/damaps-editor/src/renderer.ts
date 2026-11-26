@@ -8,11 +8,17 @@
 //
 // The file format and its rules live in tools/damaps/damapFormat.ts, shared
 // with the Da'Maps build, so what this saves is exactly what the build reads.
+//
+// Pictures: links can carry a surface (road, dirt path, bridge, river) and rooms
+// can be marked as a building. paint.ts turns those into the floor's picture,
+// shown live under the rooms (🖼 Picture) and saved as a PNG by Make picture.
 
 import {
   type DaMapFile, type DaMapRoom, type DaMapExit,
-  EXIT_KINDS, emptyDamap, parseDamap, stringifyDamap, checkDamap, zoneToDamap, oppositeExit, directionBetween,
+  type DaMapArt,
+  EXIT_KINDS, SURFACES, emptyDamap, parseDamap, stringifyDamap, checkDamap, zoneToDamap, oppositeExit, directionBetween, artStamp,
 } from '../../damaps/damapFormat'
+import { type Brushes, loadBrushes, paintFloor, floorHasArt, floorBounds } from './paint'
 import { readGenieXml } from '../../damaps/readGenieXml'
 
 interface Api {
@@ -29,6 +35,8 @@ interface Api {
   onMapsUpdated(fn: (paths: string[]) => void): void
   reopen(path: string): Promise<string | null>
   mapIndex(): Promise<MapEntry[]>
+  saveArt(mapPath: string, file: string, png: ArrayBuffer): Promise<string>
+  showArt(mapPath: string): Promise<string>
 }
 interface MapEntry { path: string; name: string; links: string[] }
 const api = (window as unknown as { api: Api }).api
@@ -59,6 +67,8 @@ let past: string[] = []
 let future: string[] = []
 const view = { tx: 0, ty: 0, s: 3 }
 let byId = new Map<number, DaMapRoom>()
+/** What new links are drawn as ('' = a plain link). */
+let linkSurface = ''
 // The maps in the map folder, for "Doorway to": shown by name, stored by link name.
 let mapIndex: MapEntry[] = []
 const mapForLink = (link: string) => mapIndex.find(m => m.links.some(l => l.toLowerCase() === link.toLowerCase()))
@@ -70,6 +80,7 @@ async function refreshMapIndex() {
 const $ = <T extends Element = HTMLElement>(sel: string) => document.querySelector(sel) as unknown as T
 const svg = $<SVGSVGElement>('#canvas')
 const gView = $<SVGGElement>('#view')
+const gArt = $<SVGGElement>('#layer-art')
 const gLines = $<SVGGElement>('#layer-lines')
 const gRooms = $<SVGGElement>('#layer-rooms')
 const gLabels = $<SVGGElement>('#layer-labels')
@@ -188,6 +199,89 @@ function render() {
   gLabels.innerHTML = labels
   renderFloors()
   updateStatus()
+  scheduleArt()
+}
+
+// ── Picture ─────────────────────────────────────────────────────────────────
+// The floor's picture, painted from the map (paint.ts), under the rooms. Made
+// again a moment after each change, at a size that keeps big maps quick.
+
+let brushes: Brushes | null = null
+let artOn = localStorage.getItem('damaps-editor.art') !== 'off'
+let artTimer = 0, artSeq = 0, artUrl: string | null = null
+loadBrushes().then(b => { brushes = b; scheduleArt() }).catch(err => { console.error(err); status.textContent = `The picture brushes didn't load: ${(err as Error).message}` })
+function scheduleArt() {
+  clearTimeout(artTimer)
+  artTimer = window.setTimeout(drawArt, 150)
+}
+function setArt(url: string | null, bb?: { x: number; y: number; w: number; h: number }) {
+  if (artUrl) URL.revokeObjectURL(artUrl)
+  artUrl = url
+  gArt.innerHTML = url && bb ? `<image href="${url}" x="${bb.x}" y="${bb.y}" width="${bb.w}" height="${bb.h}" preserveAspectRatio="none" style="pointer-events:none"/>` : ''
+}
+async function drawArt() {
+  const seq = ++artSeq
+  ;($('#art-toggle') as HTMLButtonElement).classList.toggle('on', artOn)
+  if (!artOn || !brushes || !floorHasArt(map, floor)) { setArt(null); return }
+  const bb = floorBounds(map, floor)!
+  const scale = Math.min(2, 5000 / Math.max(bb.w, bb.h))
+  const img = await paintImage(floor, bb, scale, 'preview')
+  if (seq !== artSeq || !img) return
+  setArt(URL.createObjectURL(img), bb)
+}
+/**
+ * Paint a floor into an image. The preview is a JPEG and the saved picture a
+ * WebP: both encode in well under a second, where a PNG of a big floor can take
+ * a minute (the ground's grain doesn't compress), and a WebP is about a tenth
+ * of a PNG's size for players to download.
+ */
+function paintImage(z: number, bb: { x: number; y: number; w: number; h: number }, scale: number, use: 'preview' | 'save'): Promise<Blob | null> {
+  const c = document.createElement('canvas')
+  c.width = Math.max(1, Math.round(bb.w * scale)); c.height = Math.max(1, Math.round(bb.h * scale))
+  paintFloor(c.getContext('2d')!, map, z, brushes!, { ox: bb.x, oy: bb.y, scale })
+  return new Promise(ok => use === 'preview' ? c.toBlob(ok, 'image/jpeg', 0.85) : c.toBlob(ok, 'image/webp', 0.9))
+}
+function toggleArt() {
+  artOn = !artOn
+  localStorage.setItem('damaps-editor.art', artOn ? 'on' : 'off')
+  scheduleArt()
+}
+
+/** How each floor's saved picture compares with the map now. */
+function pictureState(z: number): 'none' | 'ok' | 'old' | 'unused' {
+  const a = map.art?.find(x => x.z === z)
+  if (!floorHasArt(map, z)) return a ? 'unused' : 'none'
+  if (!a) return 'none'
+  return a.stamp === artStamp(map, z) ? 'ok' : 'old'
+}
+const artStem = () => (map.file.replace(/\.xml$/i, '') || 'Map').replace(/[\\/:*?"<>|]+/g, '').replace(/\s+/g, '_')
+
+/** Paint every floor that has roads or buildings, save the pictures, and remember them in the map. */
+async function makePictures() {
+  if (!brushes) { alert("The picture brushes haven't loaded."); return }
+  const zs = floors().filter(z => floorHasArt(map, z))
+  if (!zs.length) { alert('Nothing to draw yet: give some links a surface (Road, Dirt path…) or mark rooms as a building.'); return }
+  if (!filePath || dirty) {
+    if (!filePath) alert('Save the map first, so the pictures know where to go.')
+    if (!(await save(false)) || !filePath) return
+  }
+  const made: DaMapArt[] = []
+  try {
+    for (const z of zs) {
+      status.textContent = `Painting ${floorName(z)}…`
+      const bb = floorBounds(map, z)!
+      // 3 pixels per map unit, as the hand-painted Crossing; smaller for a huge floor
+      const scale = Math.min(3, 12000 / Math.max(bb.w, bb.h))
+      const img = await paintImage(z, bb, scale, 'save')
+      if (!img || img.type !== 'image/webp') throw new Error(`${floorName(z)} couldn't be painted (too big?)`)
+      const file = zs.length === 1 && z === 0 ? `${artStem()}.webp` : `${artStem()}@${z}.webp`
+      await api.saveArt(filePath, file, await img.arrayBuffer())
+      made.push({ z, file, x: bb.x, y: bb.y, scale, width: Math.round(bb.w * scale), height: Math.round(bb.h * scale), stamp: artStamp(map, z) })
+    }
+  } catch (err) { alert(`Couldn't make the picture:\n\n${(err as Error).message}`); updateStatus(); return }
+  change(() => { map.art = made })
+  await save(false)
+  status.textContent = `Made ${made.length} picture${made.length === 1 ? '' : 's'}: ${made.map(a => a.file).join(', ')} (in the art folder beside your maps)`
 }
 
 function floorName(z: number) { return z === 0 ? 'Ground floor' : z > 0 ? `Up ${z}` : `Down ${-z}` }
@@ -245,6 +339,38 @@ function numBox(value: number | undefined, set: (v: number | undefined) => void,
   return el
 }
 
+// ── Picture helpers (surfaces and buildings) ────────────────────────────────
+
+/** The building name a room's title suggests: the part before the comma ("Bank, Lobby" → "Bank"). */
+const buildingNameFor = (title: string) => title.split(',')[0].trim() || 'Building'
+/** The surface on the path between two rooms (either way's exit), '' for none. */
+function surfaceBetween(a: DaMapRoom, b: DaMapRoom): string {
+  return a.exits.find(e => e.to === b.id && e.surface)?.surface ?? b.exits.find(e => e.to === a.id && e.surface)?.surface ?? ''
+}
+/** Set the surface on the path between two rooms, both ways. */
+function setSurfaceBetween(a: DaMapRoom, b: DaMapRoom, v: string) {
+  for (const [x, y] of [[a, b], [b, a]] as const) for (const e of x.exits) {
+    if (e.to !== y.id) continue
+    if (v) e.surface = v; else delete e.surface
+  }
+}
+/** A list of the surfaces, with "plain" (no surface) first. */
+function surfaceSelect(value: string, mixed = false) {
+  const sel = h('select') as HTMLSelectElement
+  if (mixed) sel.append(new Option('(mixed)', '*'))
+  sel.append(new Option('plain link (not drawn)', ''))
+  for (const [id, name] of SURFACES) sel.append(new Option(name, id))
+  sel.value = mixed ? '*' : value
+  return sel
+}
+/** Rooms on the same floor that a room has a path with. */
+function neighbours(r: DaMapRoom): DaMapRoom[] {
+  const out = new Map<number, DaMapRoom>()
+  for (const e of r.exits) { const o = byId.get(e.to); if (o && o.id !== r.id && o.z === r.z) out.set(o.id, o) }
+  for (const o of map.rooms) if (o.z === r.z && o.id !== r.id && o.exits.some(e => e.to === r.id)) out.set(o.id, o)
+  return [...out.values()]
+}
+
 function renderProps() {
   props.replaceChildren()
   const rooms = [...selRooms].map(id => byId.get(id)).filter(Boolean) as DaMapRoom[]
@@ -266,6 +392,23 @@ function renderMapProps() {
   if (!map.rooms.length) props.append(h('p', { class: 'hint' }, 'No rooms yet. Pick the Room tool (R) and click to place one.'))
   else if (!probs.length) props.append(h('p', { class: 'ok' }, `✓ ${map.rooms.length} rooms, nothing to fix`))
   for (const p of probs) props.append(h('p', { class: 'warn' }, '⚠ ' + p))
+  props.append(h('h2', {}, 'Picture'))
+  const zs = [...new Set([...floors(), ...(map.art ?? []).map(a => a.z)])].sort((a, b) => b - a)
+  const shown = zs.filter(z => pictureState(z) !== 'none' || floorHasArt(map, z))
+  if (!shown.length) props.append(h('p', { class: 'hint' }, 'No roads or buildings yet. Give links a surface (the “as” list in the toolbar, or select rooms) and mark rooms as buildings, then make the picture here.'))
+  for (const z of shown) {
+    const st = pictureState(z), name = zs.length > 1 ? `${floorName(z)}: ` : ''
+    const text = st === 'ok' ? `✓ ${name}picture up to date` : st === 'old' ? `⚠ ${name}picture is older than the map. Make it again.`
+      : st === 'unused' ? `⚠ ${name}has a picture but nothing to draw any more; making pictures removes it` : `${name}no picture yet`
+    props.append(h('p', { class: st === 'ok' ? 'ok' : st === 'none' ? 'hint' : 'warn' }, text))
+  }
+  const make = h('button', { class: 'primary' }, 'Make picture')
+  make.title = 'Paint every floor with roads or buildings and save the pictures in the art folder beside your maps'
+  make.onclick = () => { makePictures() }
+  const folder = h('button', {}, 'Show art folder')
+  ;(folder as HTMLButtonElement).disabled = !filePath
+  folder.onclick = () => { if (filePath) api.showArt(filePath) }
+  props.append(h('div', { class: 'row' }, make, folder))
   props.append(h('h2', {}, 'Tips'))
   props.append(h('p', { class: 'hint' }, 'Click a room to edit it. Shift-click with the Room tool to draw a street room by room. Help → How to use the editor has the rest.'))
 }
@@ -331,6 +474,27 @@ function renderManyProps(rooms: DaMapRoom[]) {
   fl.onchange = () => change(() => rooms.forEach(r => { r.z = Number(fl.value) }))
   props.append(h('h2', {}, 'Floor'))
   props.append(field('Move to', fl))
+  // the picture: what the paths between them are, and whether they're one building
+  const ids = new Set(rooms.map(r => r.id))
+  const pairs: [DaMapRoom, DaMapRoom][] = []
+  for (const r of rooms) for (const o of neighbours(r)) if (ids.has(o.id) && r.id < o.id) pairs.push([r, o])
+  props.append(h('h2', {}, 'Picture'))
+  if (pairs.length) {
+    const vals = new Set(pairs.map(([a, b]) => surfaceBetween(a, b)))
+    const sel = surfaceSelect([...vals][0], vals.size > 1)
+    sel.onchange = () => { if (sel.value !== '*') change(() => pairs.forEach(([a, b]) => setSurfaceBetween(a, b, sel.value))) }
+    props.append(field('Path between them', sel, `What the ${pairs.length} path${pairs.length === 1 ? '' : 's'} between these rooms are drawn as`))
+  } else props.append(h('p', { class: 'hint' }, 'These rooms have no paths between them. Link them first to give the paths a surface.'))
+  const names = new Set(rooms.map(r => r.building ?? ''))
+  const bname = rooms.find(r => r.building)?.building ?? buildingNameFor(rooms[0].title)
+  const one = h('button', {}, 'Make them one building')
+  one.title = `Mark all ${rooms.length} as “${bname}”: joined rooms with the same building name share one roof`
+  one.onclick = () => change(() => rooms.forEach(r => { r.building = bname }))
+  const none = h('button', {}, 'Not a building')
+  ;(none as HTMLButtonElement).disabled = names.size === 1 && names.has('')
+  none.onclick = () => change(() => rooms.forEach(r => { delete r.building }))
+  props.append(h('div', { class: 'row' }, one, none))
+  props.append(h('h2', {}, 'Edit'))
   const link = h('button', {}, 'Link them in a row')
   link.title = 'Add exits both ways between each room and the next, in the order you selected them'
   link.onclick = () => change(() => { for (let i = 1; i < rooms.length; i++) addLink(rooms[i - 1], rooms[i], false) })
@@ -354,6 +518,19 @@ function renderRoomProps(r: DaMapRoom) {
   props.append(field('Other names', textBox((r.aliases ?? []).join('\n'), v => { const a = v.split('\n').map(s => s.trim()).filter(Boolean); if (a.length) r.aliases = a; else delete r.aliases }, { area: true, rows: 2, placeholder: 'One per line (optional)' }), 'Other names people search this room by, e.g. a shop\'s name'))
   props.append(field('Doorway to', doorwayPicker(r), 'Makes this square a doorway onto another map'))
   props.append(field('Lich room #', numBox(r.lich, v => { if (v) r.lich = v; else delete r.lich }, { blankOk: true }), 'Only if Da\'Maps matches this room to the wrong Lich room. Leave blank otherwise.'))
+
+  props.append(h('h2', {}, 'Picture'))
+  const bchk = h('input', { type: 'checkbox' }) as HTMLInputElement
+  bchk.checked = !!r.building
+  bchk.onchange = () => change(() => { if (bchk.checked) r.building = buildingNameFor(r.title); else delete r.building })
+  props.append(h('label', { class: 'check', title: 'Put a roof on this room. Joined rooms with the same building name share one roof.' }, bchk, ' Building (gets a roof)'))
+  if (r.building) props.append(field('Building name', textBox(r.building, v => { if (v.trim()) r.building = v; }), 'Joined rooms with the same name share one roof. Give a room next door a different name to give it its own roof.'))
+  const ns = neighbours(r)
+  for (const o of ns) {
+    const sel = surfaceSelect(surfaceBetween(r, o))
+    sel.onchange = () => change(() => setSurfaceBetween(r, o, sel.value))
+    props.append(field(`Path to #${o.id}`, sel, `${o.title || '(no title)'}: what the path between the two rooms is drawn as`))
+  }
 
   props.append(h('h2', {}, `Exits (${r.exits.length})`))
   const table = h('table', { class: 'exits' })
@@ -399,7 +576,9 @@ function addLink(a: DaMapRoom, b: DaMapRoom, oneWay: boolean) {
   const add = (from: DaMapRoom, to: DaMapRoom, exit: string) => {
     if (from.exits.some(e => e.to === to.id)) return
     const move = exit === 'go' ? 'go ' : exit
-    from.exits.push({ to: to.id, exit, move } as DaMapExit)
+    const ex: DaMapExit = { to: to.id, exit, move }
+    if (linkSurface) ex.surface = linkSurface
+    from.exits.push(ex)
   }
   add(a, b, dir)
   if (!oneWay) add(b, a, oppositeExit(dir) ?? 'go')
@@ -598,6 +777,7 @@ window.addEventListener('keydown', e => {
     case 'l': case 'L': setTool('link'); break
     case 't': case 'T': setTool('label'); break
     case 'f': case 'F': fit(); updateStatus(); break
+    case 'p': case 'P': toggleArt(); break
     case 'Delete': case 'Backspace': deleteSelection(); break
     case 'Escape': select([]); break
     case 'ArrowLeft': e.preventDefault(); nudge(-step, 0); break
@@ -711,6 +891,14 @@ for (const b of document.querySelectorAll<HTMLButtonElement>('#tools button')) b
 ;($('#floor') as HTMLSelectElement).onchange = e => { floor = Number((e.target as HTMLSelectElement).value); select([]) }
 $('#floor-add').onclick = () => { const top = Math.max(...floors()); extraFloors.add(top + 1); floor = top + 1; select([]) }
 $('#fit').onclick = () => { fit(); updateStatus() }
+$('#art-toggle').onclick = toggleArt
+{
+  const sel = $('#link-surface') as HTMLSelectElement
+  sel.append(new Option('plain link', ''))
+  for (const [id, name] of SURFACES) sel.append(new Option(name, id))
+  sel.value = linkSurface = localStorage.getItem('damaps-editor.link-surface') ?? ''
+  sel.onchange = () => { linkSurface = sel.value; localStorage.setItem('damaps-editor.link-surface', linkSurface) }
+}
 $('#undo').onclick = undo
 $('#redo').onclick = redo
 $('#save').onclick = () => save(false)
