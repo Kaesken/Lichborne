@@ -20,9 +20,28 @@ await build({ ...common, entryPoints: [path.join(src, 'renderer.ts')], outfile: 
 for (const f of ['index.html', 'editor.css']) fs.copyFileSync(path.join(src, f), path.join(dist, f))
 // the picture brushes (Kaesken's Clip Studio pack), loaded by paint.ts
 fs.cpSync(path.join(here, 'brushes'), path.join(dist, 'brushes'), { recursive: true })
+// the window icon (the program's own comes from icon/icon.ico, set below)
+fs.copyFileSync(path.join(here, 'icon', 'icon.png'), path.join(dist, 'icon.png'))
 const pkg = JSON.parse(fs.readFileSync(path.join(here, 'package.json'), 'utf8'))
 fs.writeFileSync(path.join(dist, 'package.json'), JSON.stringify({ name: pkg.name, productName: pkg.productName, version: pkg.version, description: pkg.description, author: pkg.author, main: 'main.js' }, null, 1))
 console.log('built', path.relative(process.cwd(), dist))
+
+// The program's icon. electron-builder only sets it with signAndEditExecutable,
+// which needs Windows tools (rcedit), so it's written here with resedit (pure
+// JavaScript, already installed by electron-builder): the icon group in
+// Electron's exe is replaced by every size in icon/icon.ico.
+async function setExeIcon(exePath) {
+  const R = await import('resedit')
+  const exe = R.NtExecutable.from(fs.readFileSync(exePath), { ignoreCert: true })
+  const res = R.NtExecutableResource.from(exe)
+  const ico = R.Data.IconFile.from(fs.readFileSync(path.join(here, 'icon', 'icon.ico')))
+  const groups = R.Resource.IconGroupEntry.fromEntries(res.entries)
+  if (!groups.length) throw new Error('no icon group in ' + exePath)
+  for (const g of groups) R.Resource.IconGroupEntry.replaceIconsForResource(res.entries, g.id, g.lang, ico.icons.map(i => i.data))
+  res.outputResource(exe)
+  fs.writeFileSync(exePath, Buffer.from(exe.generate()))
+  console.log('icon set:', path.basename(exePath))
+}
 
 if (process.argv.includes('--pack')) {
   const { build: pack, Platform } = await import('electron-builder')
@@ -35,6 +54,7 @@ if (process.argv.includes('--pack')) {
       directories: { output: path.join(here, 'release'), app: dist },
       files: ['**/*'], npmRebuild: false, asar: true,
       win: { signAndEditExecutable: false, artifactName: 'DaMaps-Editor-${version}.${ext}' },
+      afterPack: ctx => setExeIcon(path.join(ctx.appOutDir, 'DaMaps Editor.exe')),
       portable: { artifactName: 'DaMaps-Editor-${version}.exe' },
     },
   })
@@ -72,7 +92,7 @@ if (process.argv.includes('--installer')) {
   const top = fs.readdirSync(src).filter(f => fs.statSync(path.join(src, f)).isFile())
   fs.writeFileSync(files, top.map(f => `  Delete "$INSTDIR\\${f}"`).join('\n') + '\n')
   const out = path.join(here, 'release', `DaMaps-Editor-Setup-${pkg.version}.exe`)
-  execFileSync(makensis, ['-V2', `-DSRC=${src}`, `-DOUT=${out}`, `-DVERSION=${pkg.version}`, `-DFILES=${files}`, path.join(here, 'installer.nsi')],
+  execFileSync(makensis, ['-V2', `-DSRC=${src}`, `-DOUT=${out}`, `-DVERSION=${pkg.version}`, `-DFILES=${files}`, `-DICON=${path.join(here, 'icon', 'icon.ico')}`, path.join(here, 'installer.nsi')],
     { stdio: 'inherit', env: nsisDir ? { ...process.env, NSISDIR: nsisDir } : process.env })
   console.log('installer:', path.relative(process.cwd(), out))
 }

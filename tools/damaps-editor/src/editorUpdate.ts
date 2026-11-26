@@ -17,17 +17,18 @@ export const TAG_PREFIX = 'editor-v'
 export const EDITOR_RAW = 'https://raw.githubusercontent.com/Kaesken/Da-Maps/main/editor'
 
 /** editor/version.json: the newest editor and what its app.asar is. */
-export interface UpdateInfo { version: string; electron: string; size: number; sha256: string; notes: string }
+/** `full`: this version changes the program file itself (its icon, say), so only the installer brings it. */
+export interface UpdateInfo { version: string; electron: string; size: number; sha256: string; notes: string; full: boolean }
 
 export function parseUpdateInfo(j: unknown): UpdateInfo | null {
   const o = j as Record<string, unknown> | null
   if (!o || typeof o !== 'object') return null
-  const { version, electron, size, sha256, notes } = o
+  const { version, electron, size, sha256, notes, full } = o
   if (typeof version !== 'string' || !/^\d+\.\d+\.\d+$/.test(version)) return null
   if (typeof electron !== 'string' || !/^\d+\.\d+\.\d+/.test(electron)) return null
   if (typeof size !== 'number' || !(size > 0 && size < 100e6)) return null
   if (typeof sha256 !== 'string' || !/^[0-9a-f]{64}$/.test(sha256)) return null
-  return { version, electron, size, sha256, notes: typeof notes === 'string' ? notes.trim() : '' }
+  return { version, electron, size, sha256, notes: typeof notes === 'string' ? notes.trim() : '', full: full === true }
 }
 
 /** Read editor/version.json. Throws when GitHub can't be reached; null when it isn't there or isn't valid. */

@@ -22,7 +22,7 @@ const send = (action: string) => win?.webContents.send('menu', action)
 function createWindow() {
   win = new BrowserWindow({
     width: 1400, height: 900, minWidth: 900, minHeight: 600,
-    title: 'DaMaps Editor', backgroundColor: '#1b1d22',
+    title: 'DaMaps Editor', backgroundColor: '#1b1d22', icon: path.join(__dirname, 'icon.png'),
     webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, sandbox: false, spellcheck: false },
   })
   win.loadFile(path.join(__dirname, 'index.html'))
@@ -222,7 +222,7 @@ ipcMain.handle('confirm', (_e, msg: string, detail: string) =>
 //    its size and SHA-256, then close the editor (asking about unsaved changes
 //    as usual). A hidden PowerShell waits for it to exit, moves the new file
 //    over resources\app.asar and opens the editor again.
-//  - Full install (new Electron): download the installer from the newest
+//  - Full install (new Electron, or version.json says `full`): download the installer from the newest
 //    release and run it silently over this folder (`/S /UPDATE /D=…`), which
 //    also reopens the editor.
 // Run from source, as the old portable exe, or from a folder it can't write
@@ -258,7 +258,7 @@ async function checkForUpdate(manual: boolean) {
     }
     const notes = info.notes ? `\n\nWhat's new:\n${info.notes.length > 900 ? info.notes.slice(0, 900) + '…' : info.notes}` : ''
     const have = `You have version ${app.getVersion()}.`
-    const small = info.electron === process.versions.electron && canSwap()
+    const small = info.electron === process.versions.electron && !info.full && canSwap()
     const rel = small ? null : await findNewestRelease(fetchFn).catch(() => null)
     const full = !small && rel && compareVersions(rel.version, app.getVersion()) > 0 && canSelfInstall() ? rel : null
     if (!small && !full) {

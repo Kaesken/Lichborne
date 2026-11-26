@@ -74,6 +74,23 @@ current user, adds Start menu and optional desktop shortcuts, an uninstaller (in
 Settings → Apps and on the Start menu), and the installed editor keeps maps in
 `Documents\DaMaps`. It isn't code signed, so Windows warns on first run.
 
+## The icon
+
+`icon/icon.svg` (the full drawing, used from 48 px up) and `icon/icon-small.svg`
+(bolder and simpler, for 16–40 px) are the sources. `icon/icon.ico` holds every
+size and `icon/icon.png` is the 256 px window icon; remake them after changing
+an SVG:
+
+```
+cd tools/damaps-editor/icon
+for s in 48 64 128 256; do rsvg-convert -w $s -h $s icon.svg -o $s.png; done
+for s in 16 20 24 32 40; do rsvg-convert -w $s -h $s icon-small.svg -o $s.png; done
+# then pack the nine PNGs into icon.ico (one PNG per entry), and copy 256.png to icon.png
+```
+
+`build.mjs` writes the .ico into the program file with resedit (electron-builder
+would need Windows tools for that), and the installer and uninstaller use it too.
+
 ## Updates
 
 Everything is published from the Da-Maps repository
@@ -86,7 +103,8 @@ Everything is published from the Da-Maps repository
   hidden PowerShell moves it over `resources\app.asar` and reopens the editor.
 - **Full installs.** Releases tagged `editor-v<version>` carry
   `DaMaps-Editor-Setup-<version>.exe`, for a first install or when Electron
-  changed. The editor then runs that installer silently over its own folder
+  changed, or when `version.json` says `"full": true` (the program file itself
+  changed, such as its icon). The editor then runs that installer silently over its own folder
   (`/S /UPDATE /D=<folder>`); the installer waits for it to close and reopens it.
 
 The editor checks a few seconds after it opens (it says nothing unless there's

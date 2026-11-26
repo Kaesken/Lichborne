@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="256" height="256">
+<!-- DaMaps Editor icon: an overland scroll map (ranges, a river, a forest, a trail to an X). -->
+<defs><clipPath id="paper"><path d="M28 30 L100 30 L102 40 L98 50 L103 60 L98 70 L102 80 L98 90 L100 98 L28 98 L26 88 L30 78 L25 68 L30 58 L26 48 L30 38 Z"/></clipPath></defs>
+<rect x="8" y="8" width="112" height="112" rx="24" fill="#2b3a4a"/>
+<g clip-path="url(#paper)">
+<rect width="128" height="128" fill="#e3c98f"/>
+<path d="M20 20 L108 20 L108 108 L20 108 Z" fill="none" stroke="#8a5a2a" stroke-width="10" opacity="0.3"/>
+<path d="M32 46 L39 36 L46 46 M42 46 L50 34 L58 46 M54 46 L61 38 L68 46" fill="none" stroke="#5a3a1c" stroke-width="2.4" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M78 40 L82 34 L86 40 L90 34 L94 40" fill="none" stroke="#5a3a1c" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M62 30 C64 46 74 54 70 66 S78 86 74 100" fill="none" stroke="#3f7fae" stroke-width="3" stroke-linecap="round"/>
+<path d="M80 60 L83 54 L86 60 Z M88 64 L91 58 L94 64 Z M82 70 L85 64 L88 70 Z M90 74 L93 68 L96 74 Z" fill="#4a5a24"/>
+<path d="M36 82 C44 70 52 72 58 66 S68 78 82 84" fill="none" stroke="#9e2f24" stroke-width="2.5" stroke-dasharray="4 4" stroke-linecap="round"/>
+<path d="M78 80 L86 88 M86 80 L78 88" stroke="#9e2f24" stroke-width="3.2" stroke-linecap="round"/>
+<circle cx="36" cy="82" r="2.5" fill="#9e2f24"/>
+</g>
+<rect x="20" y="22" width="88" height="10" rx="5" fill="#c9a46c" stroke="#6b4a26" stroke-width="2"/>
+<rect x="20" y="96" width="88" height="10" rx="5" fill="#c9a46c" stroke="#6b4a26" stroke-width="2"/>
+<rect x="14" y="24" width="8" height="6" rx="2" fill="#6b4a26"/><rect x="106" y="24" width="8" height="6" rx="2" fill="#6b4a26"/>
+<rect x="14" y="98" width="8" height="6" rx="2" fill="#6b4a26"/><rect x="106" y="98" width="8" height="6" rx="2" fill="#6b4a26"/>
+</svg>

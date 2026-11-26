@@ -1,7 +1,8 @@
 ; DaMaps Editor — the Windows installer to share.
 ; Built by `node tools/damaps-editor/build.mjs --pack --installer`, which packs
 ; the program folder (release/win-unpacked) and runs makensis on this file with
-; -DSRC=<that folder> -DOUT=<setup exe> -DVERSION=<x.y.z> -DFILES=<list .nsh>.
+; -DSRC=<that folder> -DOUT=<setup exe> -DVERSION=<x.y.z> -DFILES=<list .nsh>
+; -DICON=<icon/icon.ico>.
 ; Hand-written rather than electron-builder's NSIS target, which needs Wine.
 ;
 ; Installs for the current user (no admin): %LOCALAPPDATA%\Programs\DaMaps Editor
@@ -36,6 +37,8 @@ VIAddVersionKey "FileVersion" "${VERSION}"
 VIAddVersionKey "ProductVersion" "${VERSION}"
 VIAddVersionKey "LegalCopyright" "Lichborne contributors"
 
+!define MUI_ICON "${ICON}"
+!define MUI_UNICON "${ICON}"
 !define MUI_ABORTWARNING
 !define MUI_WELCOMEPAGE_TITLE "Install ${APP} ${VERSION}"
 !define MUI_WELCOMEPAGE_TEXT "${APP} makes and changes maps for Lichborne's Da'Maps.$\r$\n$\r$\nYour maps are kept in Documents\DaMaps. Use $\"Latest maps$\" in the editor to download the official ones.$\r$\n$\r$\nClick Next to continue."
