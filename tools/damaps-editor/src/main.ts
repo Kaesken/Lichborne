@@ -220,8 +220,8 @@ ipcMain.handle('confirm', (_e, msg: string, detail: string) =>
 //  - Small update (the usual case): when editor/version.json is newer and was
 //    built for this same Electron, download editor/app.asar (~400 KB), check
 //    its size and SHA-256, then close the editor (asking about unsaved changes
-//    as usual). A hidden PowerShell waits for it to exit, moves the new file
-//    over resources\app.asar and opens the editor again.
+//    as usual). A helper (startHelper, below) waits for it to exit, moves the
+//    new file over resources\app.asar and opens the editor again.
 //  - Full install (new Electron, or version.json says `full`): download the installer from the newest
 //    release and run it silently over this folder (`/S /UPDATE /D=…`), which
 //    also reopens the editor.
@@ -276,12 +276,14 @@ async function checkForUpdate(manual: boolean) {
       const file = asarPath() + '.new'
       await download(`${EDITOR_RAW}/app.asar?v=${info.version}`, file, info.size, info.sha256, info.version)
       pendingSwap = { file, asar: asarPath() }
+      startHelper({ asarNew: file, asar: asarPath() })
     } else {
       const dir = path.join(os.tmpdir(), 'DaMaps Editor update')
       fs.mkdirSync(dir, { recursive: true })
       const file = path.join(dir, full!.asset.name)
       await download(full!.asset.url, file, full!.asset.size, full!.asset.sha256, full!.version)
       pendingInstaller = file
+      startHelper({ installer: file, dir: path.dirname(process.execPath) })
     }
     win?.webContents.send('status', `DaMaps Editor ${info.version} is ready. It installs when the editor closes.`)
     win?.close()
@@ -320,8 +322,53 @@ async function download(url: string, file: string, size: number, sha256: string 
   }
 }
 
-// a single-quoted PowerShell string
-const psq = (s: string) => `'${s.replace(/'/g, "''")}'`
+// The helper that finishes an update. It runs as a second, windowless copy of
+// this same program in plain Node mode (ELECTRON_RUN_AS_NODE), from a script in
+// the temp folder (not app.asar, which it has to replace). It's started as soon
+// as the download is ready, before the editor closes, and waits for the editor
+// (by process id) to exit; then it either moves app.asar.new over app.asar and
+// opens the editor again, or runs the installer silently over this folder, which
+// reopens it. It writes what it did to "DaMaps Editor update\update.log" in the
+// temp folder. (1.3.0 and 1.3.1 used a hidden PowerShell started at quit, which
+// never ran on Kaesken's PC.)
+const HELPER = String.raw`
+process.noAsar = true
+const fs = require('fs'), path = require('path'), { spawn } = require('child_process')
+const a = JSON.parse(process.argv[process.argv.length - 1])
+const log = m => { try { fs.appendFileSync(a.log, new Date().toISOString() + ' ' + m + '\n') } catch {} }
+const alive = p => { try { process.kill(p, 0); return true } catch (e) { return e.code === 'EPERM' } }
+const sleep = ms => new Promise(r => setTimeout(r, ms))
+;(async () => {
+  log('waiting for the editor (pid ' + a.pid + ') to close')
+  const until = Date.now() + 12 * 3600e3
+  while (alive(a.pid) && Date.now() < until) await sleep(500)
+  if (alive(a.pid)) { log('gave up waiting'); return }
+  const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE
+  if (a.installer) {
+    log('running the installer: ' + a.installer)
+    spawn(a.installer, ['/S', '/UPDATE', '/D=' + a.dir], { argv0: '"' + a.installer + '"', detached: true, stdio: 'ignore', windowsVerbatimArguments: true, env }).unref()
+    return
+  }
+  let moved = false
+  for (let i = 0; i < 80 && !moved; i++) {
+    try { fs.renameSync(a.asarNew, a.asar); moved = true } catch (e) { if (i === 79) log('could not replace app.asar: ' + e.message); await sleep(250) }
+  }
+  log(moved ? 'updated app.asar' : 'left the old version in place')
+  spawn(a.exe, [], { detached: true, stdio: 'ignore', env }).unref()
+  log('reopened the editor')
+})().catch(e => log('failed: ' + (e && e.stack || e)))
+`
+
+function startHelper(job: { asarNew?: string; asar?: string; installer?: string; dir?: string }) {
+  const tmp = path.join(os.tmpdir(), 'DaMaps Editor update')
+  fs.mkdirSync(tmp, { recursive: true })
+  const script = path.join(tmp, 'update-helper.js')
+  fs.writeFileSync(script, HELPER)
+  const args = { ...job, pid: process.pid, exe: process.execPath, log: path.join(tmp, 'update.log') }
+  spawn(process.execPath, [script, JSON.stringify(args)], {
+    env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }, detached: true, stdio: 'ignore', windowsHide: true,
+  }).unref()
+}
 
 app.whenReady().then(() => {
   // a swap that never happened (the editor was killed before closing)
@@ -329,26 +376,3 @@ app.whenReady().then(() => {
   menu(); createWindow(); setTimeout(() => checkForUpdate(false), 4000)
 })
 app.on('window-all-closed', () => app.quit())
-// Both waits for this process to end before replacing the files.
-app.on('quit', () => {
-  if (pendingSwap) {
-    // Wait for the editor to exit, move the new app.asar into place (retrying
-    // while Windows still holds the old one), then open the editor again.
-    // -EncodedCommand (UTF-16) so any folder name survives.
-    const script = [
-      `$id = ${process.pid}`,
-      `try { Wait-Process -Id $id -Timeout 60 -ErrorAction Stop } catch {}`,
-      `for ($i = 0; $i -lt 40; $i++) { try { Move-Item -LiteralPath ${psq(pendingSwap.file)} -Destination ${psq(pendingSwap.asar)} -Force -ErrorAction Stop; break } catch { Start-Sleep -Milliseconds 250 } }`,
-      `Start-Process -FilePath ${psq(process.execPath)}`,
-    ].join('\n')
-    spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')],
-      { detached: true, stdio: 'ignore', windowsHide: true }).unref()
-    return
-  }
-  if (!pendingInstaller) return
-  const dir = path.dirname(process.execPath)
-  // Verbatim, because NSIS wants /D= last and unquoted even with spaces; that
-  // also stops Node quoting the program's own name, so quote it here (argv0),
-  // or a temp folder with a space in it would be read as arguments.
-  spawn(pendingInstaller, ['/S', '/UPDATE', `/D=${dir}`], { argv0: `"${pendingInstaller}"`, detached: true, stdio: 'ignore', windowsVerbatimArguments: true }).unref()
-})

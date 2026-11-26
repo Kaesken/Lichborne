@@ -99,12 +99,14 @@ Everything is published from the Da-Maps repository
 - **Small updates.** `editor/version.json` names the newest version and the
   Electron it was built for; `editor/app.asar` is the editor itself (~400 KB).
   When the Electron matches, an installed editor downloads that one file, checks
-  its size and SHA-256, closes (asking about unsaved changes as usual), and a
-  hidden PowerShell moves it over `resources\app.asar` and reopens the editor.
+  its size and SHA-256 and starts a helper (a windowless copy of the editor's
+  own program in Node mode, run from the temp folder). The editor closes (asking
+  about unsaved changes as usual); the helper waits for it, moves the file over
+  `resources\app.asar` and reopens it. It logs to `%TEMP%\DaMaps Editor update\update.log`.
 - **Full installs.** Releases tagged `editor-v<version>` carry
   `DaMaps-Editor-Setup-<version>.exe`, for a first install or when Electron
   changed, or when `version.json` says `"full": true` (the program file itself
-  changed, such as its icon). The editor then runs that installer silently over its own folder
+  changed, such as its icon). The helper then runs that installer silently over the editor's folder
   (`/S /UPDATE /D=<folder>`); the installer waits for it to close and reopens it.
 
 The editor checks a few seconds after it opens (it says nothing unless there's
