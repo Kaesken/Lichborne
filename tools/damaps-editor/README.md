@@ -76,20 +76,29 @@ Settings → Apps and on the Start menu), and the installed editor keeps maps in
 
 ## Updates
 
-New versions are releases on the Da-Maps repository
-(github.com/Kaesken/Da-Maps/releases), tagged `editor-v<version>` with
-`DaMaps-Editor-Setup-<version>.exe` attached ([editorUpdate.ts](src/editorUpdate.ts)).
-To publish one: raise `version` in [package.json](package.json), build the
-installer, and make a release with that tag and that file. Lichborne doesn't
-read releases, so this never affects players.
+Everything is published from the Da-Maps repository
+([editorUpdate.ts](src/editorUpdate.ts)):
 
-The editor checks once a few seconds after it opens (it says nothing unless
-there's a newer version) and from Help → Check for updates. **Update now**
-downloads the installer, checks its size and SHA-256 against GitHub, closes the
-editor (asking about unsaved changes as usual) and runs the installer silently
-over the editor's own folder (`/S /UPDATE /D=<folder>`). The installer waits for
-the editor to close, then reopens it. Run from source or as the old portable
-exe, it only offers the download page.
+- **Small updates.** `editor/version.json` names the newest version and the
+  Electron it was built for; `editor/app.asar` is the editor itself (~400 KB).
+  When the Electron matches, an installed editor downloads that one file, checks
+  its size and SHA-256, closes (asking about unsaved changes as usual), and a
+  hidden PowerShell moves it over `resources\app.asar` and reopens the editor.
+- **Full installs.** Releases tagged `editor-v<version>` carry
+  `DaMaps-Editor-Setup-<version>.exe`, for a first install or when Electron
+  changed. The editor then runs that installer silently over its own folder
+  (`/S /UPDATE /D=<folder>`); the installer waits for it to close and reopens it.
+
+The editor checks a few seconds after it opens (it says nothing unless there's
+something newer) and from Help → Check for updates. Run from source, as the old
+portable exe, or from a folder it can't write to, it only offers the download page.
+
+**To publish a version:** raise `version` in [package.json](package.json) and
+push to the `damaps` branch, then on Da-Maps open **Actions → Publish DaMaps
+Editor → Run workflow** (with a line for "What's new"). That builds the editor on
+GitHub, makes the release with the installer, and commits `editor/`. Doing it on
+GitHub avoids the web page's 25 MB upload limit. Lichborne reads none of this
+(`.gitattributes` leaves `editor/` out of its maps zip).
 
 ## Building it
 

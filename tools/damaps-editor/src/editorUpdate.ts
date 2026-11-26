@@ -1,17 +1,42 @@
 // DaMaps Editor — finding a newer editor on GitHub.
 //
-// New versions are published as releases on the Da-Maps repository
-// (github.com/Kaesken/Da-Maps), tagged `editor-v<x.y.z>` with the installer
-// `DaMaps-Editor-Setup-<x.y.z>.exe` attached. The tag prefix keeps editor
-// releases apart from anything else that repository might release later.
-// Lichborne doesn't look at releases (it downloads the maps by commit), so a
-// release changes nothing for players.
+// Two ways, both on the Da-Maps repository (github.com/Kaesken/Da-Maps):
+//  - Small updates: `editor/version.json` names the newest version and the
+//    Electron it was built for, and `editor/app.asar` is the editor itself
+//    (~400 KB). When the Electron matches, the editor swaps in that one file.
+//  - Full installs: releases tagged `editor-v<x.y.z>` with
+//    `DaMaps-Editor-Setup-<x.y.z>.exe` attached, for a first install or a new
+//    Electron. The Da-Maps "Publish DaMaps Editor" workflow makes both.
+// Lichborne reads neither (`.gitattributes` leaves editor/ out of its maps zip).
 //
 // No Electron imports, so a plain Node harness can drive it with any fetch.
 
 export const RELEASES_API = 'https://api.github.com/repos/Kaesken/Da-Maps/releases?per_page=30'
 export const RELEASES_PAGE = 'https://github.com/Kaesken/Da-Maps/releases'
 export const TAG_PREFIX = 'editor-v'
+export const EDITOR_RAW = 'https://raw.githubusercontent.com/Kaesken/Da-Maps/main/editor'
+
+/** editor/version.json: the newest editor and what its app.asar is. */
+export interface UpdateInfo { version: string; electron: string; size: number; sha256: string; notes: string }
+
+export function parseUpdateInfo(j: unknown): UpdateInfo | null {
+  const o = j as Record<string, unknown> | null
+  if (!o || typeof o !== 'object') return null
+  const { version, electron, size, sha256, notes } = o
+  if (typeof version !== 'string' || !/^\d+\.\d+\.\d+$/.test(version)) return null
+  if (typeof electron !== 'string' || !/^\d+\.\d+\.\d+/.test(electron)) return null
+  if (typeof size !== 'number' || !(size > 0 && size < 100e6)) return null
+  if (typeof sha256 !== 'string' || !/^[0-9a-f]{64}$/.test(sha256)) return null
+  return { version, electron, size, sha256, notes: typeof notes === 'string' ? notes.trim() : '' }
+}
+
+/** Read editor/version.json. Throws when GitHub can't be reached; null when it isn't there or isn't valid. */
+export async function fetchUpdateInfo(fetchFn: Fetch): Promise<UpdateInfo | null> {
+  const r = await fetchFn(`${EDITOR_RAW}/version.json?t=${Date.now()}`, { headers: { 'User-Agent': 'DaMaps-Editor', 'Cache-Control': 'no-cache' } })
+  if (r.status === 404) return null
+  if (!r.ok) throw new Error(`GitHub answered ${r.status}.`)
+  return parseUpdateInfo(await r.json())
+}
 
 export interface EditorRelease {
   version: string

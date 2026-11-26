@@ -8,7 +8,7 @@ import path from 'node:path'
 import { decodeMapFile } from '../../damaps/readGenieXml'
 import { planUpdate, applyUpdate, type Record_ } from './officialMaps'
 import { parseDamap } from '../../damaps/damapFormat'
-import { findNewestRelease, compareVersions, RELEASES_PAGE, type EditorRelease } from './editorUpdate'
+import { findNewestRelease, fetchUpdateInfo, compareVersions, RELEASES_PAGE, EDITOR_RAW } from './editorUpdate'
 import { spawn } from 'node:child_process'
 import crypto from 'node:crypto'
 import os from 'node:os'
@@ -215,43 +215,75 @@ ipcMain.handle('confirm', (_e, msg: string, detail: string) =>
   dialog.showMessageBoxSync(win!, { type: 'question', buttons: ['Save', "Don't save", 'Cancel'], defaultId: 0, cancelId: 2, message: msg, detail }))
 
 // ── Updates ──────────────────────────────────────────────────────────────
-// Checks the Da-Maps repository's releases (editorUpdate.ts) once at start,
-// quietly, and from Help → Check for updates. Accepting downloads the
-// installer, checks its size and SHA-256 against what GitHub reports, then
-// closes the editor (asking about unsaved changes as usual) and runs the
-// installer silently over this copy's own folder, which reopens it.
-// Run from source or as the old portable exe, it only offers the download page.
+// Checks the Da-Maps repository (editorUpdate.ts) once at start, quietly, and
+// from Help → Check for updates.
+//  - Small update (the usual case): when editor/version.json is newer and was
+//    built for this same Electron, download editor/app.asar (~400 KB), check
+//    its size and SHA-256, then close the editor (asking about unsaved changes
+//    as usual). A hidden PowerShell waits for it to exit, moves the new file
+//    over resources\app.asar and opens the editor again.
+//  - Full install (new Electron): download the installer from the newest
+//    release and run it silently over this folder (`/S /UPDATE /D=…`), which
+//    also reopens the editor.
+// Run from source, as the old portable exe, or from a folder it can't write
+// to, it only offers the download page.
 let updateBusy = false
+let pendingSwap: { file: string; asar: string } | null = null
 let pendingInstaller: string | null = null
 
 function canSelfInstall(): boolean {
   return app.isPackaged && process.platform === 'win32' && !process.env.PORTABLE_EXECUTABLE_DIR
 }
+const resourcesDir = () => process.resourcesPath
+const asarPath = () => path.join(resourcesDir(), 'app.asar')
+function canSwap(): boolean {
+  if (!app.isPackaged || process.platform !== 'win32' || process.env.PORTABLE_EXECUTABLE_DIR) return false
+  try {
+    const probe = path.join(resourcesDir(), '.write-test')
+    fs.writeFileSync(probe, ''); fs.rmSync(probe)
+    return fs.existsSync(asarPath())
+  } catch { return false }
+}
 
 async function checkForUpdate(manual: boolean) {
-  if (!win || updateBusy) return
+  if (!win || updateBusy || pendingSwap || pendingInstaller) return
   updateBusy = true
   try {
     if (manual) win.webContents.send('status', 'Checking GitHub for a newer DaMaps Editor…')
-    const rel = await findNewestRelease((url, init) => net.fetch(url, init) as never)
-    if (!rel || compareVersions(rel.version, app.getVersion()) <= 0) {
+    const fetchFn = (url: string, init?: { headers?: Record<string, string> }) => net.fetch(url, init) as never
+    const info = await fetchUpdateInfo(fetchFn)
+    if (!info || compareVersions(info.version, app.getVersion()) <= 0) {
       if (manual) dialog.showMessageBox(win, { type: 'info', message: 'DaMaps Editor is up to date.', detail: `You have version ${app.getVersion()}, the newest there is.` })
       return
     }
-    const notes = rel.notes ? `\n\nWhat's new:\n${rel.notes.length > 900 ? rel.notes.slice(0, 900) + '…' : rel.notes}` : ''
-    if (!canSelfInstall()) {
+    const notes = info.notes ? `\n\nWhat's new:\n${info.notes.length > 900 ? info.notes.slice(0, 900) + '…' : info.notes}` : ''
+    const have = `You have version ${app.getVersion()}.`
+    const small = info.electron === process.versions.electron && canSwap()
+    const rel = small ? null : await findNewestRelease(fetchFn).catch(() => null)
+    const full = !small && rel && compareVersions(rel.version, app.getVersion()) > 0 && canSelfInstall() ? rel : null
+    if (!small && !full) {
       const c = (await dialog.showMessageBox(win, { type: 'info', buttons: ['Open download page', 'Later'], defaultId: 0, cancelId: 1,
-        message: `DaMaps Editor ${rel.version} is available.`, detail: `You have version ${app.getVersion()}.${notes}` })).response
-      if (c === 0) shell.openExternal(rel.page)
+        message: `DaMaps Editor ${info.version} is available.`, detail: `${have} This copy can't update itself, so download the new version from GitHub.${notes}` })).response
+      if (c === 0) shell.openExternal(rel?.page ?? RELEASES_PAGE)
       return
     }
+    const size = small ? info.size : full!.asset.size
     const c = (await dialog.showMessageBox(win, { type: 'info', buttons: ['Update now', 'Later'], defaultId: 0, cancelId: 1,
-      message: `DaMaps Editor ${rel.version} is available.`,
-      detail: `You have version ${app.getVersion()}. Updating downloads it (${Math.round(rel.asset.size / 1e6)} MB), closes the editor and opens the new version. Your maps aren't touched.${notes}` })).response
+      message: `DaMaps Editor ${info.version} is available.`,
+      detail: `${have} Updating downloads it (${size < 1e6 ? `${Math.max(1, Math.round(size / 1e3))} KB` : `${Math.round(size / 1e6)} MB`}), closes the editor and opens the new version. Your maps aren't touched.${notes}` })).response
     if (c !== 0) return
-    const file = await downloadInstaller(rel)
-    pendingInstaller = file
-    win?.webContents.send('status', `DaMaps Editor ${rel.version} is ready. It installs when the editor closes.`)
+    if (small) {
+      const file = asarPath() + '.new'
+      await download(`${EDITOR_RAW}/app.asar?v=${info.version}`, file, info.size, info.sha256, info.version)
+      pendingSwap = { file, asar: asarPath() }
+    } else {
+      const dir = path.join(os.tmpdir(), 'DaMaps Editor update')
+      fs.mkdirSync(dir, { recursive: true })
+      const file = path.join(dir, full!.asset.name)
+      await download(full!.asset.url, file, full!.asset.size, full!.asset.sha256, full!.version)
+      pendingInstaller = file
+    }
+    win?.webContents.send('status', `DaMaps Editor ${info.version} is ready. It installs when the editor closes.`)
     win?.close()
   } catch (e) {
     if (manual) dialog.showMessageBox(win!, { type: 'error', message: 'Couldn\'t check for updates', detail: `${(e as Error).message}\n\nCheck your internet connection and try again, or get it from ${RELEASES_PAGE}` })
@@ -259,40 +291,60 @@ async function checkForUpdate(manual: boolean) {
   } finally {
     updateBusy = false
     win?.setProgressBar(-1)
-    if (!pendingInstaller) win?.webContents.send('status', '')
+    if (!pendingSwap && !pendingInstaller) win?.webContents.send('status', '')
   }
 }
 
-async function downloadInstaller(rel: EditorRelease): Promise<string> {
-  const dir = path.join(os.tmpdir(), 'DaMaps Editor update')
-  fs.mkdirSync(dir, { recursive: true })
-  const file = path.join(dir, rel.asset.name)
-  const res = await net.fetch(rel.asset.url, { headers: { 'User-Agent': 'DaMaps-Editor' } })
+/** Download to `file`, checking the size and (when known) SHA-256; nothing is left behind on failure. */
+async function download(url: string, file: string, size: number, sha256: string | null, version: string) {
+  const res = await net.fetch(url, { headers: { 'User-Agent': 'DaMaps-Editor', 'Cache-Control': 'no-cache' } })
   if (!res.ok || !res.body) throw new Error(`The download failed (GitHub answered ${res.status}).`)
   const hash = crypto.createHash('sha256')
   const out = fs.createWriteStream(file)
-  let got = 0, shown = -1
+  let got = 0, shown = -1, ok = false
   try {
     for await (const chunk of res.body as unknown as AsyncIterable<Uint8Array>) {
       got += chunk.length
-      if (got > rel.asset.size) throw new Error('The download is bigger than GitHub says it should be.')
+      if (got > size) throw new Error('The download is bigger than GitHub says it should be.')
       hash.update(chunk)
-      if (!out.write(chunk)) await new Promise<void>(ok => out.once('drain', () => ok()))
-      const pct = Math.floor(got * 100 / rel.asset.size)
-      if (pct !== shown) { shown = pct; win?.setProgressBar(got / rel.asset.size); win?.webContents.send('status', `Downloading DaMaps Editor ${rel.version}… ${pct}%`) }
+      if (!out.write(chunk)) await new Promise<void>(r => out.once('drain', () => r()))
+      const pct = Math.floor(got * 100 / size)
+      if (pct !== shown) { shown = pct; win?.setProgressBar(got / size); win?.webContents.send('status', `Downloading DaMaps Editor ${version}… ${pct}%`) }
     }
+    if (got !== size) throw new Error('The download was cut short.')
+    if (sha256 && hash.digest('hex') !== sha256) throw new Error('The download didn\'t match the one on GitHub, so it wasn\'t installed.')
+    ok = true
   } finally {
-    await new Promise<void>(ok => out.end(() => ok()))
+    await new Promise<void>(r => out.end(() => r()))
+    if (!ok) fs.rmSync(file, { force: true })
   }
-  if (got !== rel.asset.size) { fs.rmSync(file, { force: true }); throw new Error('The download was cut short.') }
-  if (rel.asset.sha256 && hash.digest('hex') !== rel.asset.sha256) { fs.rmSync(file, { force: true }); throw new Error('The download didn\'t match the one on GitHub, so it wasn\'t installed.') }
-  return file
 }
 
-app.whenReady().then(() => { menu(); createWindow(); setTimeout(() => checkForUpdate(false), 4000) })
+// a single-quoted PowerShell string
+const psq = (s: string) => `'${s.replace(/'/g, "''")}'`
+
+app.whenReady().then(() => {
+  // a swap that never happened (the editor was killed before closing)
+  if (app.isPackaged) fs.rmSync(asarPath() + '.new', { force: true })
+  menu(); createWindow(); setTimeout(() => checkForUpdate(false), 4000)
+})
 app.on('window-all-closed', () => app.quit())
-// the installer waits for this process to end before replacing the files
+// Both waits for this process to end before replacing the files.
 app.on('quit', () => {
+  if (pendingSwap) {
+    // Wait for the editor to exit, move the new app.asar into place (retrying
+    // while Windows still holds the old one), then open the editor again.
+    // -EncodedCommand (UTF-16) so any folder name survives.
+    const script = [
+      `$id = ${process.pid}`,
+      `try { Wait-Process -Id $id -Timeout 60 -ErrorAction Stop } catch {}`,
+      `for ($i = 0; $i -lt 40; $i++) { try { Move-Item -LiteralPath ${psq(pendingSwap.file)} -Destination ${psq(pendingSwap.asar)} -Force -ErrorAction Stop; break } catch { Start-Sleep -Milliseconds 250 } }`,
+      `Start-Process -FilePath ${psq(process.execPath)}`,
+    ].join('\n')
+    spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')],
+      { detached: true, stdio: 'ignore', windowsHide: true }).unref()
+    return
+  }
   if (!pendingInstaller) return
   const dir = path.dirname(process.execPath)
   // Verbatim, because NSIS wants /D= last and unquoted even with spaces; that
