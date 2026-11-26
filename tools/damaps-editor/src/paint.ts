@@ -10,7 +10,8 @@
 // picture are the same pixels at different sizes. Nothing here knows about the
 // editor's state; it only reads the map.
 //
-// Order, bottom to top: ground, river, dirt paths, roads, bridges, roofs.
+// The picture is transparent where nothing is drawn, so the map's own
+// background shows through it. Order, bottom to top: river, dirt paths, roads, bridges, roofs.
 // Within a kind, short pieces go first, so a side street that ends in a main
 // road tucks under it rather than drawing across it.
 
@@ -28,7 +29,7 @@ export interface Brushes {
 }
 type Strip = 'road' | 'dirt' | 'bridge' | 'river'
 /** How wide each strip is, in map units (a room is 8). */
-const WIDTH: Record<Strip, number> = { river: 16, dirt: 6, road: 7, bridge: 7 }
+const WIDTH: Record<Strip, number> = { river: 7, dirt: 7, road: 7, bridge: 7 }
 const ORDER: string[] = ['river', 'dirt', 'road', 'bridge', 'bridge-stone']
 
 /** Load the brush images (from the editor's brushes/ folder), turned so every strip runs top to bottom. */
@@ -76,8 +77,8 @@ const px = (p: Paint, x: number, y: number): [number, number] => [(x - p.ox) * p
 
 /**
  * Paint floor `z` into `g`. The canvas's top-left is map point (ox, oy) and it
- * has `scale` pixels per map unit. `ground` fills the background; without it
- * the picture is transparent where nothing is drawn.
+ * has `scale` pixels per map unit. The picture is transparent where nothing
+ * is drawn; `ground: true` fills the background (with a little grain) instead.
  */
 export function paintFloor(g: CanvasRenderingContext2D, m: DaMapFile, z: number, b: Brushes,
   opts: { ox: number; oy: number; scale: number; ground?: boolean }) {
@@ -85,7 +86,7 @@ export function paintFloor(g: CanvasRenderingContext2D, m: DaMapFile, z: number,
   const { width: W, height: H } = g.canvas
   g.save()
   g.imageSmoothingQuality = 'high'
-  if (opts.ground !== false) {
+  if (opts.ground === true) {
     g.fillStyle = GROUND
     g.fillRect(0, 0, W, H)
     // a whisper of grain keeps big dark areas from looking flat (palette.txt)

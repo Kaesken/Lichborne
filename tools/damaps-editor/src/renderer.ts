@@ -231,16 +231,15 @@ async function drawArt() {
   setArt(URL.createObjectURL(img), bb)
 }
 /**
- * Paint a floor into an image. The preview is a JPEG and the saved picture a
- * WebP: both encode in well under a second, where a PNG of a big floor can take
- * a minute (the ground's grain doesn't compress), and a WebP is about a tenth
- * of a PNG's size for players to download.
+ * Paint a floor into an image: a WebP, transparent where nothing is drawn so
+ * the map's own background shows through. It encodes in well under a second
+ * and is about a tenth of a PNG's size for players to download.
  */
 function paintImage(z: number, bb: { x: number; y: number; w: number; h: number }, scale: number, use: 'preview' | 'save'): Promise<Blob | null> {
   const c = document.createElement('canvas')
   c.width = Math.max(1, Math.round(bb.w * scale)); c.height = Math.max(1, Math.round(bb.h * scale))
   paintFloor(c.getContext('2d')!, map, z, brushes!, { ox: bb.x, oy: bb.y, scale })
-  return new Promise(ok => use === 'preview' ? c.toBlob(ok, 'image/jpeg', 0.85) : c.toBlob(ok, 'image/webp', 0.9))
+  return new Promise(ok => c.toBlob(ok, 'image/webp', use === 'preview' ? 0.85 : 0.9))
 }
 function toggleArt() {
   artOn = !artOn
