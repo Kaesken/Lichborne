@@ -1157,7 +1157,9 @@ export type GenieMapsResult =
 // The Lichborne-managed copy of the Da'Maps maps (.damap files from
 // github.com/Kaesken/Da-Maps) in `{userData}/DaMaps` (main/damapsDownload.ts).
 // Same shapes as the Genie maps download; `maps` counts the .damap files.
-export type DaMapsStatus = GenieMapsStatus
+// `local` is set when a mapper points Lichborne at their own folder of maps
+// (LICHBORNE_DAMAPS_DIR); then nothing is downloaded and Update reloads it.
+export type DaMapsStatus = GenieMapsStatus & { local?: boolean }
 export type DaMapsProgress = GenieMapsProgress
 export type DaMapsResult =
   | { ok: true; status: DaMapsStatus }

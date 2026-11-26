@@ -195,6 +195,7 @@ function jobText(p: DaMapsProgress): string {
 
 /** When the maps were downloaded, for the Update button's tooltip. */
 function installedText(s: DaMapsStatus): string {
+  if (s.local) return `${s.maps ?? 'No'} maps from your own folder, ${s.dir}`
   const when = s.installedAt ? new Date(s.installedAt).toLocaleString() : 'an unknown time'
   return `${s.maps ?? 'The'} maps, downloaded ${when}${s.commit ? ` (version ${s.commit.slice(0, 7)})` : ''}`
 }
@@ -247,11 +248,25 @@ export default function DaMapsView({ lichDb, currentRoom, character, roomTitle, 
     setStatus(r.status)
     showToast({
       kind: 'success',
-      title: wasInstalled ? `${DA_MAPS_NAME} updated` : `${DA_MAPS_NAME} downloaded`,
-      message: `${r.status.maps ?? 'The'} maps from GitHub are ready.`,
+      title: r.status.local ? `${DA_MAPS_NAME} reloaded` : wasInstalled ? `${DA_MAPS_NAME} updated` : `${DA_MAPS_NAME} downloaded`,
+      message: r.status.local ? `${r.status.maps ?? 'The'} maps from your own folder.` : `${r.status.maps ?? 'The'} maps from GitHub are ready.`,
     })
   }, [status])
 
+  if (status && !status.installed && status.local) {
+    return (
+      <div className="map-canvas-wrap">
+        <div className="map-empty">
+          <div className="map-empty-icon">🗺</div>
+          <div className="map-empty-msg">No maps in your maps folder</div>
+          <div className="map-empty-sub">LICHBORNE_DAMAPS_DIR points at {status.dir}, which has no .damap files.</div>
+          <div className="genie-maps-actions">
+            <button className="map-btn map-btn--primary" onClick={download} disabled={!!job}>↺ Reload</button>
+          </div>
+        </div>
+      </div>
+    )
+  }
   if (status && !status.installed) {
     return (
       <div className="map-canvas-wrap">
@@ -282,7 +297,7 @@ export default function DaMapsView({ lichDb, currentRoom, character, roomTitle, 
           {worldError && (
             <div className="genie-maps-actions">
               <button className="map-btn" onClick={download} disabled={!!job}>
-                {job ? `Downloading… ${/\d/.test(job) ? job : ''}`.trim() : '⇩ Download again'}
+                {job ? `Downloading… ${/\d/.test(job) ? job : ''}`.trim() : status?.local ? '↺ Reload' : '⇩ Download again'}
               </button>
             </div>
           )}
@@ -290,10 +305,12 @@ export default function DaMapsView({ lichDb, currentRoom, character, roomTitle, 
       </div>
     )
   }
-  const updateTitle = status ? `${installedText(status)}. Click to get the latest maps from GitHub.` : 'Get the latest maps from GitHub'
+  const updateTitle = !status ? 'Get the latest maps from GitHub'
+    : status.local ? `${installedText(status)}. Click to reload them after saving in the editor.`
+    : `${installedText(status)}. Click to get the latest maps from GitHub.`
   return <DaMapsCanvas world={daWorld} lichDb={lichDb} currentRoom={currentRoom} character={character}
     roomTitle={roomTitle ?? ''} roomId={roomId} onSendCommand={onSendCommand}
-    update={{ job, title: updateTitle, run: download }} />
+    update={{ job, title: updateTitle, run: download, label: status?.local ? '↺ Reload' : '⇩ Update' }} />
 }
 
 // ── The province map (Global's first view) ──────────────────────────────────
@@ -403,7 +420,7 @@ const GO2_LEG_MS = 10 * 60_000
 function DaMapsCanvas({ world: daWorld, lichDb, currentRoom, character, roomTitle, roomId, onSendCommand, update }: {
   world: DaWorld; lichDb: Map<number, LichRoom>; currentRoom?: LichRoom; character: string
   /** the toolbar's Update button: the running download's progress, its tooltip, and the action */
-  update: { job: string | null; title: string; run: () => void }
+  update: { job: string | null; title: string; run: () => void; label: string }
   roomTitle: string; roomId?: number; onSendCommand: (cmd: string) => void
 }) {
   // ── Areas ──────────────────────────────────────────────────────────────────
@@ -1068,7 +1085,7 @@ function DaMapsCanvas({ world: daWorld, lichDb, currentRoom, character, roomTitl
             : area ? `${area.name}${hereRoom ? ' · 📍 here' : ''}` : ''}
         </span>
         <button className="map-btn map-btn--sm" onClick={update.run} disabled={!!update.job} title={update.title}>
-          {update.job ? `Updating… ${/\d/.test(update.job) ? update.job : ''}`.trim() : '⇩ Update'}
+          {update.job ? `Updating… ${/\d/.test(update.job) ? update.job : ''}`.trim() : update.label}
         </button>
       </div>
 

@@ -25,6 +25,13 @@ in the Da'Maps repository, [github.com/Kaesken/Da-Maps](https://github.com/Kaesk
    Players get it the next time they click **⇩ Update** in Da'Maps; no new
    Lichborne is needed.
 
+**Trying maps before you push them:** start Lichborne with
+`LICHBORNE_DAMAPS_DIR` set to your map folder (the DaMaps-start launcher sets it
+to `My Maps`). Da'Maps then uses that folder instead of the download, and its
+**⇩ Update** button becomes **↺ Reload**: save in the editor, click Reload, and
+Lichborne rebuilds from your files. Nothing is downloaded and nothing in the
+folder is changed.
+
 Name the `.damap` files however you like. Inside each map, the **Link name**
 (e.g. `Map1_Crossing.xml`) is how Da'Maps and other maps' doorways know it, so
 leave it as it is on an existing map; a new map gets its own. **Doorway to** on

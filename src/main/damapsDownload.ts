@@ -20,6 +20,11 @@
 // The app builds Da'Maps' map from these files and Lich's map
 // (renderer: damaps/damapsWorld.ts); main only fetches and reads them.
 //
+// For mappers: LICHBORNE_DAMAPS_DIR names a folder of .damap files (the DaMaps
+// Editor's My Maps) to use INSTEAD of the download, so maps can be tried in
+// Lichborne before they are pushed. Nothing is downloaded or deleted then, and
+// Update just reloads the folder. Players never set it.
+//
 // Kept free of electron imports, like the Genie download, so a plain-node
 // harness can drive it with a fake fetch.
 import * as fs from 'fs'
@@ -51,10 +56,32 @@ export function damapsDir(userData: string): string {
   return path.join(userData, DAMAPS_DIRNAME)
 }
 
+/** The mapper's own maps folder, when LICHBORNE_DAMAPS_DIR is set. */
+export function localDaMapsDir(env: NodeJS.ProcessEnv = process.env): string | null {
+  const d = env.LICHBORNE_DAMAPS_DIR?.trim().replace(/^"(.*)"$/, '$1')
+  return d ? path.resolve(d) : null
+}
+
+function readLocalStatus(dir: string): DaMapsStatus {
+  let maps = 0, newest = 0
+  try {
+    for (const name of fs.readdirSync(dir)) {
+      if (!isDamap(name)) continue
+      maps++
+      try { newest = Math.max(newest, fs.statSync(path.join(dir, name)).mtimeMs) } catch { /* gone */ }
+    }
+  } catch { /* missing folder: no maps */ }
+  // installedAt is the newest file's time, so saving a map in the editor
+  // changes the status and the next reload rebuilds.
+  return { dir, local: true, installed: maps > 0, commit: null, installedAt: maps ? Math.round(newest) : null, maps: maps || null }
+}
+
 const isDamap = (name: string) => /\.damap$/i.test(name)
 
 /** What is installed now. Never throws. */
 export function readDaMapsStatus(userData: string): DaMapsStatus {
+  const local = localDaMapsDir()
+  if (local) return readLocalStatus(local)
   const dir = damapsDir(userData)
   const none: DaMapsStatus = { dir, installed: false, commit: null, installedAt: null, maps: null }
   let maps = 0
@@ -132,6 +159,11 @@ export function installDaMaps(opts: {
   url?: string
   onProgress?: (p: DaMapsProgress) => void
 }): Promise<DaMapsResult> {
+  // A mapper's own folder is never downloaded over: "update" is a reload.
+  if (localDaMapsDir()) {
+    const status = readDaMapsStatus(opts.userData)
+    return Promise.resolve(status.installed ? { ok: true, status } : { ok: false, error: `no .damap files in ${status.dir}` })
+  }
   if (inflight) return inflight
   inflight = runInstall(opts).finally(() => { inflight = null })
   return inflight
