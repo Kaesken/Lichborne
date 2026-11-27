@@ -35,6 +35,7 @@ rooms, using the Clip Studio brushes in `brushes/`:
 3. Edit with the four tools:
    - **Select (V)**: click a room to edit it on the right; drag to move; drag on empty space to select several.
    - **Room (R)**: click to place a room. Shift-click places one and links it to the selected room.
+     Clicking the selected room again deselects it (dragging it still moves it).
    - **Link (L)**: drag from one room to another for exits both ways (hold Shift for one way).
    - **Label (T)**: click to place a place name.
 4. Give every room its title and description exactly as the game shows them.

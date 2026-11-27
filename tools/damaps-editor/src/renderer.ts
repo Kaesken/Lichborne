@@ -615,7 +615,8 @@ function select(ids: Iterable<number>, label: number | null = null) {
 
 type Drag =
   | { kind: 'pan'; sx: number; sy: number; tx: number; ty: number }
-  | { kind: 'move'; start: { x: number; y: number }; orig: Map<number, { x: number; y: number }>; before: string; moved: boolean }
+  // `unselect`: in Room mode, a plain click on an already-selected room lets it go (unless it's dragged)
+  | { kind: 'move'; start: { x: number; y: number }; orig: Map<number, { x: number; y: number }>; before: string; moved: boolean; unselect?: number }
   | { kind: 'label'; i: number; start: { x: number; y: number }; orig: { x: number; y: number }; before: string; moved: boolean }
   | { kind: 'box'; start: { x: number; y: number }; add: boolean }
   | { kind: 'link'; from: number }
@@ -672,6 +673,7 @@ svg.addEventListener('mousedown', e => {
     return
   }
   if (room != null) {
+    const unselect = tool === 'room' && !e.shiftKey && !e.ctrlKey && selRooms.has(room) ? room : undefined
     if (e.shiftKey || e.ctrlKey) {
       const s = new Set(selRooms)
       if (s.has(room)) s.delete(room); else s.add(room)
@@ -679,7 +681,7 @@ svg.addEventListener('mousedown', e => {
       if (!s.has(room)) return
     } else if (!selRooms.has(room)) select([room])
     const orig = new Map([...selRooms].map(id => { const r = byId.get(id)!; return [id, { x: r.x, y: r.y }] as const }))
-    drag = { kind: 'move', start: w, orig, before: snapshot(), moved: false }
+    drag = { kind: 'move', start: w, orig, before: snapshot(), moved: false, unselect }
     return
   }
   drag = { kind: 'box', start: w, add: e.shiftKey || e.ctrlKey }
@@ -727,7 +729,9 @@ window.addEventListener('mouseup', e => {
   svg.classList.remove('panning')
   gUi.innerHTML = ''
   const w = toWorld(e.clientX, e.clientY)
-  if ((d.kind === 'move' || d.kind === 'label') && d.moved) {
+  if (d.kind === 'move' && !d.moved && d.unselect != null) {
+    select([...selRooms].filter(id => id !== d.unselect))
+  } else if ((d.kind === 'move' || d.kind === 'label') && d.moved) {
     if (snapshot() !== d.before) { pushUndo(d.before); markDirty() }
     renderProps()
   } else if (d.kind === 'box') {
